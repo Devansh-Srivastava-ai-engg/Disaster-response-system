@@ -9,6 +9,8 @@ import ResourcePanel from './components/ResourcePanel';
 import RoutePlanner from './components/RoutePlanner';
 import CitizenFeed from './components/CitizenFeed';
 import WeatherSimulator from './components/WeatherSimulator';
+import RescuerFeedbackPanel from './components/RescuerFeedbackPanel';
+import { translations } from './translations';
 import './App.css';
 
 export default function App() {
@@ -24,6 +26,13 @@ export default function App() {
   const [dispatchError, setDispatchError] = useState('');
   const [dispatching, setDispatching] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [lang, setLang] = useState('en');
+
+  const t = translations[lang] || translations.en;
+
+  const toggleLanguage = () => {
+    setLang(l => (l === 'en' ? 'hi' : 'en'));
+  };
 
   // Tracks simulated rescuer movement intervals, keyed by report ID
   const rescuerTickersRef = useRef({});
@@ -37,10 +46,10 @@ export default function App() {
         api.getDispatchLog(),
         api.getBulletins(),
       ]);
-      setZones(zonesData);
+      setZones(zonesData || []);
       setSummary(summaryData);
-      setReports(reportsData);
-      setLog(logData);
+      setReports(reportsData || []);
+      setLog(logData || []);
       setBulletins(bulletinsData || []);
       setOnline(true);
     } catch (e) {
@@ -100,7 +109,7 @@ export default function App() {
   };
 
   /**
-   * Simulated rescuer movement ticker starting from NER central base (Guwahati)
+   * Simulated rescuer movement ticker starting from Central Base (Guwahati / Delhi EOC)
    */
   const startRescuerTicker = useCallback((report) => {
     const { id, lat: cLat, lng: cLng } = report;
@@ -127,7 +136,7 @@ export default function App() {
       try {
         await api.updateRescuerLocation(id, rLat, rLng);
         const reportsData = await api.getReports();
-        setReports(reportsData);
+        setReports(reportsData || []);
       } catch (e) {
         // non-fatal
       }
@@ -135,7 +144,7 @@ export default function App() {
 
     rescuerTickersRef.current[id] = setInterval(tick, 5000);
     tick();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   const stopRescuerTicker = useCallback((id) => {
     if (rescuerTickersRef.current[id]) {
@@ -144,9 +153,9 @@ export default function App() {
     }
   }, []);
 
-  const handleStatusUpdate = async (id, status) => {
+  const handleStatusUpdate = async (id, status, extra = {}) => {
     try {
-      const updatedReport = await api.updateReportStatus(id, status);
+      const updatedReport = await api.updateReportStatus(id, status, extra);
       await refreshCore();
 
       if (status === 'Dispatched') {
@@ -178,14 +187,18 @@ export default function App() {
   };
 
   if (loading) {
-    return <div className="loading-screen">CONNECTING TO NER DISASTER PREDICTION API…</div>;
+    return <div className="loading-screen">CONNECTING TO INCIDENT COMMAND API…</div>;
   }
 
   const selectedZone = zones.find((z) => z.id === selectedZoneId);
 
   return (
     <div className="wrap">
-      <Header online={online} />
+      <Header
+        online={online}
+        lang={lang}
+        onToggleLang={toggleLanguage}
+      />
 
       {/* Early Warning Bulletin Bar */}
       {bulletins.length > 0 && (
@@ -212,7 +225,7 @@ export default function App() {
       <div className="grid">
         <div className="panel">
           <h2>
-            NER Landslide &amp; Flash Flood Risk Map{' '}
+            {t.riskMapTitle}{' '}
             <span className="tag">AI PREDICTIVE GEOLOGICAL MODEL</span>
           </h2>
           <RiskMap zones={zones} selectedZoneId={selectedZoneId} onSelect={setSelectedZoneId} />
@@ -221,8 +234,8 @@ export default function App() {
 
         <div className="panel">
           <h2>
-            Predictive Hazard Ranking{' '}
-            <span className="tag">IMD PRECIPITATION &amp; SLOPE INSTABILITY</span>
+            {t.priorityTitle}{' '}
+            <span className="tag">IMD PRECIPITATION &amp; SLOPE SENSORS</span>
           </h2>
           <PriorityTable zones={zones} selectedZoneId={selectedZoneId} onSelect={setSelectedZoneId} />
 
@@ -236,7 +249,7 @@ export default function App() {
       <div className="grid">
         <div className="panel">
           <h2>
-            Mountain Disaster Resource Allocation{' '}
+            {t.resourceTitle}{' '}
             <span className="tag">{selectedZone ? `SECTOR ${selectedZone.id} (${selectedZone.state})` : 'SELECT A ZONE'}</span>
           </h2>
           <ResourcePanel
@@ -253,7 +266,7 @@ export default function App() {
 
         <div className="panel">
           <h2>
-            Mountain Highway &amp; Pass Lifeline Status{' '}
+            {t.routePlannerTitle}{' '}
             <span className="tag">{selectedZone ? `CORRIDOR → ${selectedZone.id}` : ''}</span>
           </h2>
           <RoutePlanner routes={routes} />
@@ -264,31 +277,38 @@ export default function App() {
       <div className="grid2">
         <div className="panel">
           <h2>
-            Citizen Emergency &amp; Isolated Village Feed{' '}
+            {t.citizenFeedTitle}{' '}
             <span className="tag">LIVE GROUND SOS</span>
           </h2>
-          <CitizenFeed reports={reports} onStatusUpdate={handleStatusUpdate} />
+          <CitizenFeed
+            reports={reports}
+            onStatusUpdate={handleStatusUpdate}
+            lang={lang}
+          />
         </div>
 
         <div className="panel">
           <h2>
-            Command &amp; Dispatch Log{' '}
-            <span className="tag">MOUNTAIN MISSION HISTORY</span>
+            {t.commandLogTitle}{' '}
+            <span className="tag">MISSION HISTORY</span>
           </h2>
           <div className="log-list">
-            {log.length === 0 && <div className="empty-note">Awaiting mountain unit dispatch actions…</div>}
+            {log.length === 0 && <div className="empty-note">Awaiting unit deployment actions…</div>}
             {log.map((entry) => (
               <div className="log-entry" key={entry.id}>
                 <span className="log-time">[{new Date(entry.created_at).toLocaleTimeString()}]</span>
-                <span>Deployed {entry.details} → Sector {entry.zone_id}</span>
+                <span>{entry.details}</span>
               </div>
             ))}
           </div>
         </div>
       </div>
 
+      {/* Citizen Feedback & Grievance Review Panel (Images 3 & 4 integration) */}
+      <RescuerFeedbackPanel lang={lang} />
+
       <footer className="footer-bar">
-        NER-Sentinel — North Eastern Region AI Predictive Disaster Early Warning &amp; Response System
+        {t.footer}
       </footer>
     </div>
   );

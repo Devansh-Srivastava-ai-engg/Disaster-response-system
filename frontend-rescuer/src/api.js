@@ -21,7 +21,8 @@ export const api = {
   getReports: () => request('/reports?all=true'),
   getDispatchLog: () => request('/dispatch-log'),
   submitReport: (report) => request('/reports', { method: 'POST', body: JSON.stringify(report) }),
-  updateReportStatus: (id, status) => request(`/reports/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
+  updateReportStatus: (id, status, extra = {}) =>
+    request(`/reports/${id}`, { method: 'PATCH', body: JSON.stringify({ status, ...extra }) }),
   dispatch: (payload) => request('/dispatch', { method: 'POST', body: JSON.stringify(payload) }),
   addResource: (key, count = 1) => request(`/resources/${key}`, { method: 'PATCH', body: JSON.stringify({ count }) }),
   resetResources: () => request('/resources/reset', { method: 'POST' }),
@@ -30,4 +31,7 @@ export const api = {
   getBulletins: () => request('/early-warning-bulletins'),
   updateRescuerLocation: (id, lat, lng) =>
     request(`/reports/${id}/rescuer-location`, { method: 'PATCH', body: JSON.stringify({ lat, lng }) }),
+  getFeedback: () => request('/feedback'),
+  updateFeedbackActionNote: (id, action_note) =>
+    request(`/feedback/${id}/action-note`, { method: 'PATCH', body: JSON.stringify({ action_note }) }),
 };

@@ -23,4 +23,6 @@ export const api = {
   submitReport: (report) => request('/reports', { method: 'POST', body: JSON.stringify(report) }),
   updateReportStatus: (id, status) => request(`/reports/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
   dispatch: (payload) => request('/dispatch', { method: 'POST', body: JSON.stringify(payload) }),
+  getFeedback: () => request('/feedback'),
+  submitFeedback: (feedback) => request('/feedback', { method: 'POST', body: JSON.stringify(feedback) }),
 };

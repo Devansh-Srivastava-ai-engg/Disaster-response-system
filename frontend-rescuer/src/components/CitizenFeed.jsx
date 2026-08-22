@@ -1,18 +1,21 @@
 import { useState } from 'react';
 import LiveMap from './LiveMap';
+import DispatchModal from './DispatchModal';
 
-export default function CitizenFeed({ reports, onStatusUpdate }) {
+export default function CitizenFeed({ reports, onStatusUpdate, lang = 'en' }) {
   const [updatingId, setUpdatingId] = useState(null);
   const [expandedMapId, setExpandedMapId] = useState(null);
+  const [modalReport, setModalReport] = useState(null);
 
-  const handleAction = async (id, status) => {
+  const handleAction = async (id, status, extra = {}) => {
     setUpdatingId(id);
     try {
       if (onStatusUpdate) {
-        await onStatusUpdate(id, status);
+        await onStatusUpdate(id, status, extra);
       }
     } finally {
       setUpdatingId(null);
+      setModalReport(null);
     }
   };
 
@@ -27,8 +30,9 @@ export default function CitizenFeed({ reports, onStatusUpdate }) {
   return (
     <div id="feed">
       {reports.length === 0 && (
-        <div className="empty-note">No active citizen emergency reports pending in the NER corridor.</div>
+        <div className="empty-note">No active citizen emergency reports pending in the command queue.</div>
       )}
+
       {reports.map((r) => {
         const isPending    = r.status === 'Pending';
         const isDispatched = r.status === 'Dispatched';
@@ -46,16 +50,16 @@ export default function CitizenFeed({ reports, onStatusUpdate }) {
             {/* Top row: ticket + name + status badge */}
             <div className="top">
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--accent)', fontWeight: 600 }}>
-                  {r.ticket_id || `NER-${r.id}`}
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, color: 'var(--accent)', fontWeight: 700 }}>
+                  {r.ticket_id || `SOS-${r.id}`}
                 </span>
-                <span style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text)' }}>{r.name || 'Citizen'}</span>
-                {r.is_isolated === 1 && (
+                <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>{r.name || 'Citizen'}</span>
+                {r.unit_name && (
                   <span style={{
-                    fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 999,
-                    background: 'var(--critical-soft)', color: 'var(--critical)', border: '1px solid rgba(185,28,28,0.3)'
+                    fontSize: 10.5, fontWeight: 700, padding: '2px 7px', borderRadius: 4,
+                    background: '#e0f2fe', color: '#0369a1',
                   }}>
-                    🏔️ CUTOFF VILLAGE
+                    🚤 {r.unit_name}
                   </span>
                 )}
               </div>
@@ -65,35 +69,42 @@ export default function CitizenFeed({ reports, onStatusUpdate }) {
             </div>
 
             {/* Detail grid */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, fontSize: 12.5, color: 'var(--text-dim)' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, fontSize: 12.5, color: 'var(--text-dim)', marginTop: 4 }}>
               <div>
                 Contact:{' '}
                 {r.phone && r.phone !== 'Not Provided' ? (
-                  <a href={`tel:${r.phone}`} style={{ fontWeight: 600 }}>{r.phone}</a>
+                  <a href={`tel:${r.phone}`} style={{ fontWeight: 700, color: 'var(--accent)' }}>{r.phone}</a>
                 ) : (
                   <span>Not provided</span>
                 )}
               </div>
               <div>Location: <strong style={{ color: 'var(--text)' }}>{r.location}</strong></div>
-              <div>Affected: <strong style={{ color: 'var(--text)' }}>{r.people} {r.people > 1 ? 'people' : 'person'}</strong></div>
+              <div>Affected: <strong style={{ color: 'var(--text)' }}>{r.people} {r.people > 1 ? 'persons' : 'person'}</strong></div>
               <div>Hazard: <strong style={{ color: 'var(--text)' }}>{r.emergency_type}</strong></div>
             </div>
 
-            {/* Alert flags */}
-            {(r.medical || (r.vulnerable && r.vulnerable !== 'None') || r.is_isolated) && (
-              <div style={{ background: 'var(--critical-soft)', border: '1px solid rgba(185,28,28,0.25)', padding: '8px 12px', borderRadius: 4, fontSize: 12 }}>
-                {r.is_isolated === 1 && (
-                  <div style={{ color: 'var(--critical)', fontWeight: 700, marginBottom: r.medical ? 4 : 0 }}>
-                    🏔️ Village access roads severed — Air-drop relief / JCB clearing required
-                  </div>
-                )}
+            {/* Other disaster custom details */}
+            {r.other_details && (
+              <div style={{ fontSize: 12, background: '#fffbeb', padding: '6px 10px', borderRadius: 4, color: '#92400e', marginTop: 6 }}>
+                <strong>Custom Situation:</strong> {r.other_details}
+              </div>
+            )}
+
+            {/* Alert flags & Medical */}
+            {(r.medical || r.medical_details || (r.vulnerable && r.vulnerable !== 'None')) && (
+              <div style={{ background: 'var(--critical-soft)', border: '1px solid rgba(185,28,28,0.25)', padding: '8px 12px', borderRadius: 4, fontSize: 12, marginTop: 6 }}>
                 {r.medical && (
                   <div style={{ color: 'var(--critical)', fontWeight: 700 }}>
-                    Critical — 4x4 Mountain Ambulance &amp; immediate medical personnel needed
+                    Critical — Immediate Medical / Oxygen / Ambulance required
+                  </div>
+                )}
+                {r.medical_details && (
+                  <div style={{ color: '#7f1d1d', marginTop: 2, fontSize: 11.5 }}>
+                    <strong>Details:</strong> {r.medical_details}
                   </div>
                 )}
                 {r.vulnerable && r.vulnerable !== 'None' && (
-                  <div style={{ color: 'var(--high)', marginTop: (r.medical || r.is_isolated) ? 4 : 0, fontWeight: 500 }}>
+                  <div style={{ color: 'var(--high)', marginTop: 4, fontWeight: 500 }}>
                     Vulnerable persons present: <strong>{r.vulnerable}</strong>
                   </div>
                 )}
@@ -102,15 +113,29 @@ export default function CitizenFeed({ reports, onStatusUpdate }) {
 
             {/* Access notes */}
             {r.notes && (
-              <div style={{ fontSize: 12, background: 'var(--surface-2)', padding: '8px 12px', borderRadius: 4, border: '1px solid var(--border-soft)', color: 'var(--text-dim)' }}>
-                <strong style={{ color: 'var(--text)' }}>Ground situation: </strong>
-                <span style={{ fontStyle: 'italic' }}>{r.notes}</span>
+              <div style={{ fontSize: 12, background: 'var(--surface-2)', padding: '6px 10px', borderRadius: 4, border: '1px solid var(--border-soft)', color: 'var(--text-dim)', marginTop: 6 }}>
+                <strong style={{ color: 'var(--text)' }}>Landmark notes: </strong>
+                <span>{r.notes}</span>
+              </div>
+            )}
+
+            {/* Attached Photo */}
+            {r.photo_data && (
+              <div style={{ marginTop: 8 }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-dim)', marginBottom: 4 }}>
+                  📷 Citizen Uploaded Situation Photo:
+                </div>
+                <img
+                  src={r.photo_data}
+                  alt="Citizen Upload"
+                  style={{ maxHeight: 90, borderRadius: 4, border: '1px solid var(--border)' }}
+                />
               </div>
             )}
 
             {/* Track Rescuer — expandable live map */}
             {(isDispatched || isResolved) && (
-              <div>
+              <div style={{ marginTop: 8 }}>
                 <button
                   onClick={() => setExpandedMapId(mapOpen ? null : r.id)}
                   style={{
@@ -125,11 +150,11 @@ export default function CitizenFeed({ reports, onStatusUpdate }) {
                   }}
                 >
                   <span>
-                    🗺️ {isResolved ? 'View Mountain Operation Map' : 'Track SDRF / Mountain Unit Live'}
+                    🗺️ {isResolved ? 'View Operation Map' : `Track ${r.unit_name || 'Rescue Unit'} Live`}
                     {hasMap && !isResolved && (
                       <span style={{ marginLeft: 8, display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10.5 }}>
                         <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--safe)', display: 'inline-block', animation: 'pulse 1.5s infinite' }} />
-                        LIVE
+                        LIVE (ETA ~{r.eta_mins || 20}m)
                       </span>
                     )}
                   </span>
@@ -146,18 +171,13 @@ export default function CitizenFeed({ reports, onStatusUpdate }) {
                       label={r.location}
                       height={240}
                     />
-                    {r.lat == null && (
-                      <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 6, textAlign: 'center' }}>
-                        Sector fallback coordinates active.
-                      </div>
-                    )}
                   </div>
                 )}
               </div>
             )}
 
             {/* Action row */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 8, borderTop: '1px solid var(--border-soft)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 8, borderTop: '1px solid var(--border-soft)', marginTop: 8 }}>
               <div className="time" style={{ fontSize: 11, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>
                 Received: {new Date(r.created_at).toLocaleTimeString()}
               </div>
@@ -168,9 +188,9 @@ export default function CitizenFeed({ reports, onStatusUpdate }) {
                     className="dispatch-btn"
                     style={{ width: 'auto', marginTop: 0, padding: '7px 16px', fontSize: 12 }}
                     disabled={isUpdating}
-                    onClick={() => handleAction(r.id, 'Dispatched')}
+                    onClick={() => setModalReport(r)}
                   >
-                    {isUpdating ? 'Dispatching…' : 'Authorise & Deploy Mountain Units'}
+                    {isUpdating ? 'Dispatching…' : '🚀 Authorise & Select Response Unit'}
                   </button>
                 )}
                 {isDispatched && (
@@ -180,7 +200,7 @@ export default function CitizenFeed({ reports, onStatusUpdate }) {
                     disabled={isUpdating}
                     onClick={() => handleAction(r.id, 'Resolved')}
                   >
-                    {isUpdating ? 'Updating…' : 'Mark Route Cleared / Rescued'}
+                    {isUpdating ? 'Updating…' : '✓ Mark Evacuated / Resolved'}
                   </button>
                 )}
                 {isResolved && (
@@ -191,6 +211,16 @@ export default function CitizenFeed({ reports, onStatusUpdate }) {
           </div>
         );
       })}
+
+      {/* Unit Dispatch Modal */}
+      {modalReport && (
+        <DispatchModal
+          report={modalReport}
+          lang={lang}
+          onClose={() => setModalReport(null)}
+          onConfirm={(id, extra) => handleAction(id, 'Dispatched', extra)}
+        />
+      )}
 
       <style>{`
         @keyframes pulse {

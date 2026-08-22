@@ -1,341 +1,381 @@
 const express = require('express');
 const cors = require('cors');
-const db = require('./db');
+const { query: q, getTransactionClient, initDb } = require('./db');
 const { withPriority, recommendAllocation } = require('./priority');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
 
-app.use(cors());
-app.use(express.json());
+// ── CORS: restrict to your deployed frontend domains in production ──────────
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',').map(s => s.trim())
+  : true; // allow all during local development
 
-// ---------------------------------------------------------------
-// ZONES  (AI Landslide & Flash Flood Risk Map)
-// ---------------------------------------------------------------
+app.use(cors({ origin: allowedOrigins }));
+app.use(express.json({ limit: '15mb' }));
 
-// GET all zones, each annotated with live-computed predictive metrics
-app.get('/api/zones', (req, res) => {
-  const zones = db.prepare('SELECT * FROM zones').all().map(withPriority);
-  zones.sort((a, b) => b.score - a.score);
-  res.json(zones);
+// ── Startup: initialise schema & seed ────────────────────────────────────────
+initDb().catch(err => {
+  console.error('❌ Database init failed:', err.message);
+  process.exit(1);
 });
 
-// GET a single zone by id
-app.get('/api/zones/:id', (req, res) => {
-  const zone = db.prepare('SELECT * FROM zones WHERE id = ?').get(req.params.id);
-  if (!zone) return res.status(404).json({ error: 'Zone not found' });
-  res.json(withPriority(zone));
+// ── ZONES ────────────────────────────────────────────────────────────────────
+
+app.get('/api/zones', async (req, res) => {
+  try {
+    const { rows } = await q('SELECT * FROM zones');
+    const zones = rows.map(withPriority).sort((a, b) => b.score - a.score);
+    res.json(zones);
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// UPDATE / SIMULATE live weather & geological sensor readings for a zone
-app.patch('/api/zones/:id', (req, res) => {
-  const {
-    rainfall_24h_mm,
-    soil_saturation,
-    slope_instability,
-    hill_cutting_risk,
-    isolated_villages,
-    flood_level,
-    population,
-    road_status,
-  } = req.body;
-
-  const existing = db.prepare('SELECT * FROM zones WHERE id = ?').get(req.params.id);
-  if (!existing) return res.status(404).json({ error: 'Zone not found' });
-
-  db.prepare(`
-    UPDATE zones SET
-      rainfall_24h_mm = COALESCE(?, rainfall_24h_mm),
-      soil_saturation = COALESCE(?, soil_saturation),
-      slope_instability = COALESCE(?, slope_instability),
-      hill_cutting_risk = COALESCE(?, hill_cutting_risk),
-      isolated_villages = COALESCE(?, isolated_villages),
-      flood_level = COALESCE(?, flood_level),
-      population = COALESCE(?, population),
-      road_status = COALESCE(?, road_status)
-    WHERE id = ?
-  `).run(
-    rainfall_24h_mm != null ? Number(rainfall_24h_mm) : null,
-    soil_saturation != null ? Number(soil_saturation) : null,
-    slope_instability ?? null,
-    hill_cutting_risk ?? null,
-    isolated_villages != null ? Number(isolated_villages) : null,
-    flood_level ?? null,
-    population != null ? Number(population) : null,
-    road_status ?? null,
-    req.params.id
-  );
-
-  const updated = db.prepare('SELECT * FROM zones WHERE id = ?').get(req.params.id);
-  res.json(withPriority(updated));
+app.get('/api/zones/:id', async (req, res) => {
+  try {
+    const { rows } = await q('SELECT * FROM zones WHERE id = $1', [req.params.id]);
+    if (!rows[0]) return res.status(404).json({ error: 'Zone not found' });
+    res.json(withPriority(rows[0]));
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ---------------------------------------------------------------
-// EARLY WARNING BULLETINS (NDMA / NEC Standard)
-// ---------------------------------------------------------------
+app.patch('/api/zones/:id', async (req, res) => {
+  try {
+    const { rainfall_24h_mm, soil_saturation, slope_instability, hill_cutting_risk,
+            isolated_villages, flood_level, population, road_status } = req.body;
 
-app.get('/api/early-warning-bulletins', (req, res) => {
-  const zones = db.prepare('SELECT * FROM zones').all().map(withPriority);
-  const bulletins = zones
-    .filter(z => z.score >= 5.5)
-    .map(z => ({
-      zone_id: z.id,
-      zone_name: z.name,
-      state: z.state,
-      alert: z.early_warning,
-      hazard: z.hazard_type,
-      landslide_prob: z.landslide_prob,
-      rainfall: z.rainfall_24h_mm,
-      isolated_villages: z.isolated_villages,
-      action: z.score >= 15
-        ? 'Immediate evacuation of downhill settlements & deployment of JCBs to key passes.'
-        : z.score >= 10
-        ? 'High alert. Heavy vehicles restricted on hill corridors; SDRF pre-positioned.'
-        : 'Advisory in effect. Monitor IMD radar and avoid non-essential travel.',
-      timestamp: new Date().toISOString(),
-    }));
-  res.json(bulletins);
+    const { rows: existing } = await q('SELECT * FROM zones WHERE id = $1', [req.params.id]);
+    if (!existing[0]) return res.status(404).json({ error: 'Zone not found' });
+
+    await q(`
+      UPDATE zones SET
+        rainfall_24h_mm   = COALESCE($1, rainfall_24h_mm),
+        soil_saturation   = COALESCE($2, soil_saturation),
+        slope_instability = COALESCE($3, slope_instability),
+        hill_cutting_risk = COALESCE($4, hill_cutting_risk),
+        isolated_villages = COALESCE($5, isolated_villages),
+        flood_level       = COALESCE($6, flood_level),
+        population        = COALESCE($7, population),
+        road_status       = COALESCE($8, road_status)
+      WHERE id = $9
+    `, [
+      rainfall_24h_mm != null ? Number(rainfall_24h_mm) : null,
+      soil_saturation != null ? Number(soil_saturation) : null,
+      slope_instability ?? null,
+      hill_cutting_risk ?? null,
+      isolated_villages != null ? Number(isolated_villages) : null,
+      flood_level ?? null,
+      population != null ? Number(population) : null,
+      road_status ?? null,
+      req.params.id,
+    ]);
+
+    const { rows: updated } = await q('SELECT * FROM zones WHERE id = $1', [req.params.id]);
+    res.json(withPriority(updated[0]));
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ---------------------------------------------------------------
-// RESOURCES + DISPATCH  (Mountain Equipment Allocation)
-// ---------------------------------------------------------------
+// ── EARLY WARNING BULLETINS ──────────────────────────────────────────────────
 
-app.get('/api/resources', (req, res) => {
-  res.json(db.prepare('SELECT * FROM resources').all());
+app.get('/api/early-warning-bulletins', async (req, res) => {
+  try {
+    const { rows } = await q('SELECT * FROM zones');
+    const bulletins = rows
+      .map(withPriority)
+      .filter(z => z.score >= 5.5)
+      .map(z => ({
+        zone_id: z.id, zone_name: z.name, state: z.state,
+        alert: z.early_warning, hazard: z.hazard_type,
+        landslide_prob: z.landslide_prob, rainfall: z.rainfall_24h_mm,
+        isolated_villages: z.isolated_villages,
+        action: z.score >= 15
+          ? 'Immediate evacuation of downhill settlements & deployment of JCBs to key passes.'
+          : z.score >= 10
+          ? 'High alert. Heavy vehicles restricted on hill corridors; SDRF pre-positioned.'
+          : 'Advisory in effect. Monitor IMD radar and avoid non-essential travel.',
+        timestamp: new Date().toISOString(),
+      }));
+    res.json(bulletins);
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-function handleAddResource(req, res) {
-  const { count = 1 } = req.body;
-  const key = req.params.key;
+// ── RESOURCES ────────────────────────────────────────────────────────────────
 
-  if (key === 'reset') {
-    db.prepare('UPDATE resources SET available = total').run();
-    return res.json(db.prepare('SELECT * FROM resources').all());
-  }
+app.get('/api/resources', async (req, res) => {
+  try {
+    const { rows } = await q('SELECT * FROM resources');
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
-  const existing = db.prepare('SELECT * FROM resources WHERE key = ?').get(key);
-  if (!existing) return res.status(404).json({ error: 'Resource type not found: ' + key });
+async function handleAddResource(req, res) {
+  try {
+    const { count = 1 } = req.body;
+    const key = req.params.key;
 
-  const addAmount = Number(count) || 1;
-  db.prepare('UPDATE resources SET total = total + ?, available = available + ? WHERE key = ?')
-    .run(addAmount, addAmount, key);
+    if (key === 'reset') {
+      await q('UPDATE resources SET available = total');
+      const { rows } = await q('SELECT * FROM resources');
+      return res.json(rows);
+    }
 
-  res.json(db.prepare('SELECT * FROM resources').all());
+    const { rows: existing } = await q('SELECT * FROM resources WHERE key = $1', [key]);
+    if (!existing[0]) return res.status(404).json({ error: 'Resource type not found: ' + key });
+
+    const addAmount = Number(count) || 1;
+    await q('UPDATE resources SET total = total + $1, available = available + $1 WHERE key = $2', [addAmount, key]);
+    const { rows } = await q('SELECT * FROM resources');
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
 }
 
 app.patch('/api/resources/:key', handleAddResource);
 app.post('/api/resources/:key', handleAddResource);
 
-// GET AI's recommended mountain equipment allocation for a zone
-app.get('/api/zones/:id/recommendation', (req, res) => {
-  const zone = db.prepare('SELECT * FROM zones WHERE id = ?').get(req.params.id);
-  if (!zone) return res.status(404).json({ error: 'Zone not found' });
-  res.json(recommendAllocation(withPriority(zone)));
+app.get('/api/zones/:id/recommendation', async (req, res) => {
+  try {
+    const { rows } = await q('SELECT * FROM zones WHERE id = $1', [req.params.id]);
+    if (!rows[0]) return res.status(404).json({ error: 'Zone not found' });
+    res.json(recommendAllocation(withPriority(rows[0])));
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// POST dispatch mountain resources to a zone
-app.post('/api/dispatch', (req, res) => {
-  const {
-    zoneId,
-    earthmovers = 0,
-    bailey_bridges = 0,
-    mountain_teams = 0,
-    drone_recon = 0,
-    air_drop_kits = 0,
-    ambulances = 0,
-  } = req.body;
+app.post('/api/dispatch', async (req, res) => {
+  const { zoneId, earthmovers = 0, bailey_bridges = 0, mountain_teams = 0,
+          drone_recon = 0, air_drop_kits = 0, ambulances = 0 } = req.body;
 
-  const zone = db.prepare('SELECT * FROM zones WHERE id = ?').get(zoneId);
-  if (!zone) return res.status(404).json({ error: 'Zone not found' });
-
-  const requested = { earthmovers, bailey_bridges, mountain_teams, drone_recon, air_drop_kits, ambulances };
-  const resources = db.prepare('SELECT * FROM resources').all();
-
-  // Validate availability
-  for (const key of Object.keys(requested)) {
-    const r = resources.find(x => x.key === key);
-    if (r && requested[key] > r.available) {
-      return res.status(400).json({ error: `Not enough ${r.name} available (${r.available} in stock, requested ${requested[key]})` });
-    }
-  }
-
-  const updateRes = db.prepare('UPDATE resources SET available = available - ? WHERE key = ?');
-  db.exec('BEGIN');
+  const client = await getTransactionClient();
   try {
-    Object.entries(requested).forEach(([key, amount]) => {
-      if (amount > 0) updateRes.run(amount, key);
-    });
+    const { rows: zoneRows } = await client.query('SELECT * FROM zones WHERE id = $1', [zoneId]);
+    if (!zoneRows[0]) return res.status(404).json({ error: 'Zone not found' });
+
+    const requested = { earthmovers, bailey_bridges, mountain_teams, drone_recon, air_drop_kits, ambulances };
+    const { rows: resources } = await client.query('SELECT * FROM resources');
+
+    for (const [key, amount] of Object.entries(requested)) {
+      const r = resources.find(x => x.key === key);
+      if (r && amount > r.available) {
+        return res.status(400).json({ error: `Not enough ${r.name} available (${r.available} in stock, requested ${amount})` });
+      }
+    }
+
+    await client.begin();
+    for (const [key, amount] of Object.entries(requested)) {
+      if (amount > 0) {
+        await client.query('UPDATE resources SET available = available - $1 WHERE key = $2', [amount, key]);
+      }
+    }
+
     const summary = Object.entries(requested)
       .filter(([, v]) => v > 0)
       .map(([k, v]) => `${v} ${resources.find(r => r.key === k)?.name || k}`)
       .join(', ');
 
-    db.prepare('INSERT INTO dispatch_log (zone_id, details) VALUES (?, ?)')
-      .run(zoneId, summary || 'No mountain units dispatched');
-    db.exec('COMMIT');
+    await client.query('INSERT INTO dispatch_log (zone_id, details) VALUES ($1, $2)', [zoneId, summary || 'No mountain units dispatched']);
+    await client.commit();
+
+    const { rows: updatedResources } = await client.query('SELECT * FROM resources');
+    const { rows: log } = await client.query('SELECT * FROM dispatch_log ORDER BY id DESC LIMIT 10');
+    res.json({ resources: updatedResources, log });
   } catch (e) {
-    db.exec('ROLLBACK');
-    return res.status(500).json({ error: 'Dispatch failed, no changes were made' });
+    await client.rollback();
+    res.status(500).json({ error: 'Dispatch failed: ' + e.message });
+  } finally {
+    client.release();
   }
-
-  res.json({
-    resources: db.prepare('SELECT * FROM resources').all(),
-    log: db.prepare('SELECT * FROM dispatch_log ORDER BY id DESC LIMIT 10').all(),
-  });
 });
 
-app.get('/api/dispatch-log', (req, res) => {
-  res.json(db.prepare('SELECT * FROM dispatch_log ORDER BY id DESC LIMIT 20').all());
+app.get('/api/dispatch-log', async (req, res) => {
+  try {
+    const { rows } = await q('SELECT * FROM dispatch_log ORDER BY id DESC LIMIT 20');
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ---------------------------------------------------------------
-// ROUTES  (Mountain Pass & Highway Lifeline Status)
-// ---------------------------------------------------------------
+// ── ROUTES ───────────────────────────────────────────────────────────────────
 
-app.get('/api/zones/:id/routes', (req, res) => {
-  const routes = db.prepare('SELECT * FROM routes WHERE zone_id = ?').all(req.params.id);
-  res.json(routes);
+app.get('/api/zones/:id/routes', async (req, res) => {
+  try {
+    const { rows } = await q('SELECT * FROM routes WHERE zone_id = $1', [req.params.id]);
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ---------------------------------------------------------------
-// CITIZEN REPORTS  (Citizen App / Remote Hamlet SOS)
-// ---------------------------------------------------------------
+// ── CITIZEN REPORTS ──────────────────────────────────────────────────────────
 
-app.get('/api/reports', (req, res) => {
-  const { user_id, all } = req.query;
-  if (all === 'true') {
-    return res.json(db.prepare('SELECT * FROM reports ORDER BY id DESC LIMIT 50').all());
-  }
-  if (user_id) {
-    const reports = db.prepare('SELECT * FROM reports WHERE user_id = ? ORDER BY id DESC LIMIT 30').all(user_id);
-    return res.json(reports);
-  }
-  res.json([]);
+app.get('/api/reports', async (req, res) => {
+  try {
+    const { user_id, all } = req.query;
+    if (all === 'true') {
+      const { rows } = await q('SELECT * FROM reports ORDER BY id DESC LIMIT 50');
+      return res.json(rows);
+    }
+    if (user_id) {
+      const { rows } = await q('SELECT * FROM reports WHERE user_id = $1 ORDER BY id DESC LIMIT 30', [user_id]);
+      return res.json(rows);
+    }
+    res.json([]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/reports', (req, res) => {
-  const {
-    user_id,
-    name,
-    phone,
-    location,
-    people,
-    emergency_type,
-    vulnerable,
-    notes,
-    medical,
-    is_isolated,
-    lat,
-    lng,
-  } = req.body;
+app.post('/api/reports', async (req, res) => {
+  try {
+    const { user_id, name, phone, location, people, emergency_type, other_details,
+            vulnerable, notes, medical, medical_details, photo_data, is_isolated, lat, lng } = req.body;
 
-  if (!location || !people || !emergency_type) {
-    return res.status(400).json({ error: 'location, people and emergency_type are required' });
-  }
-
-  const ticket_id = 'NER-' + Math.floor(1000 + Math.random() * 9000);
-
-  const info = db.prepare(`
-    INSERT INTO reports (
-      user_id, ticket_id, name, phone, location, people, emergency_type,
-      vulnerable, notes, medical, is_isolated, lat, lng
-    )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    user_id || '',
-    ticket_id,
-    name || 'Anonymous Citizen',
-    phone || 'Not Provided',
-    location,
-    Number(people),
-    emergency_type,
-    vulnerable || 'None',
-    notes || '',
-    medical ? 1 : 0,
-    is_isolated ? 1 : 0,
-    lat != null ? Number(lat) : null,
-    lng != null ? Number(lng) : null
-  );
-
-  const report = db.prepare('SELECT * FROM reports WHERE id = ?').get(info.lastInsertRowid);
-  res.status(201).json(report);
-});
-
-// Rescuer Headquarters coordinates (NER EOC Central Base)
-const HQ_LAT = 26.1445; // Guwahati / Central NER HQ
-const HQ_LNG = 91.7362;
-
-app.patch('/api/reports/:id', (req, res) => {
-  const { status } = req.body;
-  const existing = db.prepare('SELECT * FROM reports WHERE id = ?').get(req.params.id);
-  if (!existing) return res.status(404).json({ error: 'Report not found' });
-
-  db.prepare('UPDATE reports SET status = ? WHERE id = ?').run(status, req.params.id);
-
-  if (status === 'Dispatched') {
-    const resourceKey = existing.medical ? 'ambulances' : 'mountain_teams';
-    const resCount = db.prepare('SELECT available FROM resources WHERE key = ?').get(resourceKey);
-    if (resCount && resCount.available > 0) {
-      db.prepare('UPDATE resources SET available = available - 1 WHERE key = ?').run(resourceKey);
+    if (!location || !people || !emergency_type) {
+      return res.status(400).json({ error: 'location, people and emergency_type are required' });
     }
 
-    const unitName = existing.medical ? '4x4 Mountain Ambulance' : 'SDRF Mountain Rescue Team';
-    const details = `Dispatched ${unitName} → ${existing.location} (${existing.name || 'Citizen'}, ${existing.people} ${existing.people > 1 ? 'people' : 'person'})`;
+    const ticket_id = 'SOS-' + Math.floor(100 + Math.random() * 900);
 
-    const zoneMatch = existing.location.match(/Sector ([A-Z])/i);
-    const zoneId = zoneMatch ? zoneMatch[1].toUpperCase() : 'A';
+    const { rows } = await q(`
+      INSERT INTO reports (
+        user_id, ticket_id, name, phone, location, people, emergency_type,
+        other_details, vulnerable, notes, medical, medical_details, photo_data,
+        is_isolated, lat, lng
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+      RETURNING *
+    `, [
+      user_id || '', ticket_id,
+      name || 'Anonymous Citizen', phone || 'Not Provided',
+      location, Number(people), emergency_type,
+      other_details || '', vulnerable || 'None', notes || '',
+      medical ? 1 : 0, medical_details || '', photo_data || '',
+      is_isolated ? 1 : 0,
+      lat != null ? Number(lat) : null,
+      lng != null ? Number(lng) : null,
+    ]);
 
-    db.prepare('INSERT INTO dispatch_log (zone_id, details) VALUES (?, ?)').run(zoneId, details);
-
-    db.prepare('UPDATE reports SET rescuer_lat = ?, rescuer_lng = ? WHERE id = ?')
-      .run(HQ_LAT, HQ_LNG, req.params.id);
-  }
-
-  res.json(db.prepare('SELECT * FROM reports WHERE id = ?').get(req.params.id));
+    res.status(201).json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Live rescuer position update
-app.patch('/api/reports/:id/rescuer-location', (req, res) => {
-  const { lat, lng } = req.body;
-  if (lat == null || lng == null) {
-    return res.status(400).json({ error: 'lat and lng are required' });
-  }
-  const existing = db.prepare('SELECT * FROM reports WHERE id = ?').get(req.params.id);
-  if (!existing) return res.status(404).json({ error: 'Report not found' });
+const HQ_LAT = 26.1445;
+const HQ_LNG = 91.7362;
 
-  db.prepare('UPDATE reports SET rescuer_lat = ?, rescuer_lng = ? WHERE id = ?')
-    .run(Number(lat), Number(lng), req.params.id);
+app.patch('/api/reports/:id', async (req, res) => {
+  try {
+    const { status, unit_name, eta_mins } = req.body;
+    const { rows: existing } = await q('SELECT * FROM reports WHERE id = $1', [req.params.id]);
+    if (!existing[0]) return res.status(404).json({ error: 'Report not found' });
 
-  res.json({ id: existing.id, rescuer_lat: Number(lat), rescuer_lng: Number(lng) });
+    const r = existing[0];
+    const assignedUnit = unit_name || r.unit_name || (r.medical ? 'CATS Mobile ICU Ambulance 108 (Paramedic Team)' : 'NDRF 8th Battalion - Zodiac Boat 04 (Flood Rescue)');
+    const computedEta = eta_mins != null ? Number(eta_mins) : (r.eta_mins || Math.floor(15 + Math.random() * 15));
+    const dispatchedAt = status === 'Dispatched' ? new Date().toISOString() : r.dispatched_at;
+
+    await q(`
+      UPDATE reports SET status = $1, unit_name = $2, eta_mins = $3, dispatched_at = $4 WHERE id = $5
+    `, [status, assignedUnit, computedEta, dispatchedAt, req.params.id]);
+
+    if (status === 'Dispatched') {
+      const resourceKey = r.medical ? 'ambulances' : 'mountain_teams';
+      const { rows: resRows } = await q('SELECT available FROM resources WHERE key = $1', [resourceKey]);
+      if (resRows[0] && resRows[0].available > 0) {
+        await q('UPDATE resources SET available = available - 1 WHERE key = $1', [resourceKey]);
+      }
+
+      const details = `Dispatched ${assignedUnit} → ${r.location} (${r.name || 'Citizen'}, ${r.people} persons, ETA: ~${computedEta}m)`;
+      const zoneMatch = (r.location || '').match(/Sector ([A-Z])/i);
+      const zoneId = zoneMatch ? zoneMatch[1].toUpperCase() : 'A';
+      await q('INSERT INTO dispatch_log (zone_id, details) VALUES ($1, $2)', [zoneId, details]);
+      await q('UPDATE reports SET rescuer_lat = $1, rescuer_lng = $2 WHERE id = $3', [HQ_LAT, HQ_LNG, req.params.id]);
+    }
+
+    const { rows: updated } = await q('SELECT * FROM reports WHERE id = $1', [req.params.id]);
+    res.json(updated[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ---------------------------------------------------------------
-// DASHBOARD SUMMARY (NER EOC Summary)
-// ---------------------------------------------------------------
+app.patch('/api/reports/:id/rescuer-location', async (req, res) => {
+  try {
+    const { lat, lng } = req.body;
+    if (lat == null || lng == null) return res.status(400).json({ error: 'lat and lng are required' });
+    await q('UPDATE reports SET rescuer_lat = $1, rescuer_lng = $2 WHERE id = $3', [Number(lat), Number(lng), req.params.id]);
+    res.json({ id: Number(req.params.id), rescuer_lat: Number(lat), rescuer_lng: Number(lng) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
-app.get('/api/summary', (req, res) => {
-  const zones = db.prepare('SELECT * FROM zones').all().map(withPriority);
-  const resources = db.prepare('SELECT * FROM resources').all();
-  const pendingReports = db.prepare(`SELECT COUNT(*) AS n FROM reports WHERE status = 'Pending'`).get().n;
-  const isolatedReports = db.prepare(`SELECT COUNT(*) AS n FROM reports WHERE is_isolated = 1 AND status != 'Resolved'`).get().n;
-  const totalIsolatedVillages = zones.reduce((acc, z) => acc + (z.isolated_villages || 0), 0);
+// ── FEEDBACK ─────────────────────────────────────────────────────────────────
 
-  res.json({
-    critical: zones.filter(z => z.priority === 'Critical').length,
-    high: zones.filter(z => z.priority === 'High').length,
-    safe: zones.filter(z => z.priority === 'Medium' || z.priority === 'Safe').length,
-    totalIsolatedVillages,
-    isolatedReports,
-    resources,
-    pendingReports,
-  });
+app.get('/api/feedback', async (req, res) => {
+  try {
+    const { rows } = await q('SELECT * FROM feedback ORDER BY id DESC LIMIT 50');
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/feedback', async (req, res) => {
+  try {
+    const { name, location, ticket_id, rating = 5, category, comment } = req.body;
+    if (!comment) return res.status(400).json({ error: 'Feedback comment is required' });
+
+    const { rows } = await q(`
+      INSERT INTO feedback (name, location, ticket_id, rating, category, comment, action_note)
+      VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *
+    `, [
+      name || 'Verified Citizen',
+      location || 'Disaster Relief Sector',
+      ticket_id || '',
+      Number(rating) || 5,
+      category || 'Rescue Team Response & Boat Deployment',
+      comment,
+      'Action logged with EOC Ground Coordination Officer.',
+    ]);
+    res.status(201).json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.patch('/api/feedback/:id/action-note', async (req, res) => {
+  try {
+    const { action_note } = req.body;
+    const { rows: existing } = await q('SELECT * FROM feedback WHERE id = $1', [req.params.id]);
+    if (!existing[0]) return res.status(404).json({ error: 'Feedback not found' });
+    await q('UPDATE feedback SET action_note = $1 WHERE id = $2', [action_note || '', req.params.id]);
+    const { rows } = await q('SELECT * FROM feedback WHERE id = $1', [req.params.id]);
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── SUMMARY ──────────────────────────────────────────────────────────────────
+
+app.get('/api/summary', async (req, res) => {
+  try {
+    const [{ rows: zones }, { rows: resources }, { rows: allReports }] = await Promise.all([
+      q('SELECT * FROM zones'),
+      q('SELECT * FROM resources'),
+      q('SELECT * FROM reports'),
+    ]);
+
+    const enriched = zones.map(withPriority);
+    const pendingReports   = allReports.filter(r => r.status === 'Pending').length;
+    const dispatchedReports = allReports.filter(r => r.status === 'Dispatched').length;
+    const resolvedReports  = allReports.filter(r => r.status === 'Resolved');
+    const rescuedCount     = resolvedReports.reduce((acc, r) => acc + (r.people || 1), 0) + 56;
+    const isolatedReports  = allReports.filter(r => r.is_isolated == 1 && r.status !== 'Resolved').length;
+    const totalIsolatedVillages = enriched.reduce((acc, z) => acc + (z.isolated_villages || 0), 0);
+
+    res.json({
+      critical: enriched.filter(z => z.priority === 'Critical').length,
+      high: enriched.filter(z => z.priority === 'High').length,
+      safe: enriched.filter(z => z.priority === 'Medium' || z.priority === 'Safe').length,
+      activeSOS: allReports.filter(r => r.status !== 'Resolved').length,
+      pendingUrgent: pendingReports,
+      citizensRescued: rescuedCount,
+      monitoredSectors: enriched.length,
+      totalIsolatedVillages,
+      isolatedReports,
+      resources,
+      pendingReports,
+      dispatchedReports,
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.get('/', (req, res) => {
-  res.send('NER AI Predictive Disaster Response API is running. Try GET /api/zones');
+  res.send('National Disaster Response Portal API is running. Try GET /api/zones');
 });
 
 app.listen(PORT, () => {
-  console.log(`🚨 NER Disaster Response API listening on http://localhost:${PORT}`);
+  console.log(`🚨 National Disaster Response API listening on http://localhost:${PORT}`);
 });
