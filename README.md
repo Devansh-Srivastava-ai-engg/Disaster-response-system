@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Sentinel — AI-based Intelligent Disaster Response & Resource Allocation System
 
 A full-stack demonstration project: a command-center dashboard that ingests
@@ -86,3 +87,6 @@ npm run seed
 
 This wipes and re-populates the database with the original 6 zones and full
 resource counts.
+=======
+# Disaster-response-system
+>>>>>>> origin/main
