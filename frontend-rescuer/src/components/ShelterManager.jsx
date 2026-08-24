@@ -12,12 +12,12 @@ const SECTORS = [
 ];
 
 const DEFAULT_AMENITIES = [
-  'Clean Drinking Water',
-  'Hot Meals & Kitchen',
-  'First Aid & Medical Doctor',
-  'Solar / Generator Power Backup',
-  'Blankets & Bedding',
-  'Infant / Senior Care',
+  { id: 'Clean Drinking Water', label: 'Clean Water', icon: '💧' },
+  { id: 'Hot Meals & Kitchen', label: 'Hot Meals', icon: '🍲' },
+  { id: 'First Aid & Medical Doctor', label: 'Medical / First Aid', icon: '🏥' },
+  { id: 'Solar / Generator Power Backup', label: 'Power Backup', icon: '⚡' },
+  { id: 'Blankets & Bedding', label: 'Blankets & Bedding', icon: '🛏️' },
+  { id: 'Infant / Senior Care', label: 'Infant / Senior Care', icon: '👶' },
 ];
 
 export default function ShelterManager({ lang = 'en' }) {
@@ -27,6 +27,7 @@ export default function ShelterManager({ lang = 'en' }) {
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingShelter, setEditingShelter] = useState(null);
   const [actionSuccess, setActionSuccess] = useState(null);
+  const [showCustomGps, setShowCustomGps] = useState(false);
 
   // Form states
   const [name, setName] = useState('');
@@ -37,7 +38,11 @@ export default function ShelterManager({ lang = 'en' }) {
   const [capacityTotal, setCapacityTotal] = useState(200);
   const [capacityAvailable, setCapacityAvailable] = useState(150);
   const [status, setStatus] = useState('Open');
-  const [selectedAmenities, setSelectedAmenities] = useState(['Clean Drinking Water', 'Hot Meals & Kitchen', 'First Aid & Medical Doctor']);
+  const [selectedAmenities, setSelectedAmenities] = useState([
+    'Clean Drinking Water',
+    'Hot Meals & Kitchen',
+    'First Aid & Medical Doctor',
+  ]);
   const [contactPerson, setContactPerson] = useState('NDRF Relief Officer');
   const [contactPhone, setContactPhone] = useState('+91 98765 43210');
   const [notes, setNotes] = useState('');
@@ -60,17 +65,24 @@ export default function ShelterManager({ lang = 'en' }) {
 
   const handleSectorSelectChange = (sec) => {
     setSectorId(sec);
-    const found = SECTORS.find(s => s.id === sec);
+    const found = SECTORS.find((s) => s.id === sec);
     if (found && found.lat) {
       setLat(found.lat.toString());
       setLng(found.lng.toString());
     }
   };
 
-  const toggleAmenity = (amenity) => {
-    setSelectedAmenities(prev =>
-      prev.includes(amenity) ? prev.filter(a => a !== amenity) : [...prev, amenity]
+  const toggleAmenity = (amenityId) => {
+    setSelectedAmenities((prev) =>
+      prev.includes(amenityId)
+        ? prev.filter((a) => a !== amenityId)
+        : [...prev, amenityId]
     );
+  };
+
+  const handleSetCapacityPreset = (pct) => {
+    const total = Number(capacityTotal) || 100;
+    setCapacityAvailable(Math.round((total * pct) / 100));
   };
 
   const handleOpenAddModal = (shelterToEdit = null) => {
@@ -84,24 +96,36 @@ export default function ShelterManager({ lang = 'en' }) {
       setCapacityTotal(shelterToEdit.capacity_total);
       setCapacityAvailable(shelterToEdit.capacity_available);
       setStatus(shelterToEdit.status);
-      setSelectedAmenities(shelterToEdit.amenities ? shelterToEdit.amenities.split(',').map(s => s.trim()) : []);
+      setSelectedAmenities(
+        shelterToEdit.amenities
+          ? shelterToEdit.amenities.split(',').map((s) => s.trim())
+          : []
+      );
       setContactPerson(shelterToEdit.contact_person || '');
       setContactPhone(shelterToEdit.contact_phone || '');
       setNotes(shelterToEdit.notes || '');
+      setShowCustomGps(false);
     } else {
       setEditingShelter(null);
       setName('');
-      setSectorId('A');
+      setSectorId(activeSector !== 'all' ? activeSector : 'A');
+      const defSec = activeSector !== 'all' ? activeSector : 'A';
+      const found = SECTORS.find((s) => s.id === defSec);
+      setLat(found?.lat?.toString() || '25.1685');
+      setLng(found?.lng?.toString() || '93.0234');
       setLocation('');
-      setLat('25.1685');
-      setLng('93.0234');
       setCapacityTotal(200);
-      setCapacityAvailable(150);
+      setCapacityAvailable(200);
       setStatus('Open');
-      setSelectedAmenities(['Clean Drinking Water', 'Hot Meals & Kitchen', 'First Aid & Medical Doctor']);
+      setSelectedAmenities([
+        'Clean Drinking Water',
+        'Hot Meals & Kitchen',
+        'First Aid & Medical Doctor',
+      ]);
       setContactPerson('NDRF Relief Officer');
       setContactPhone('+91 98765 43210');
       setNotes('');
+      setShowCustomGps(false);
     }
     setShowAddModal(true);
   };
@@ -132,7 +156,7 @@ export default function ShelterManager({ lang = 'en' }) {
         setActionSuccess(`✓ Relief Shelter "${payload.name}" updated successfully.`);
       } else {
         await api.addShelter(payload);
-        setActionSuccess(`✓ New Relief Shelter "${payload.name}" established and published live.`);
+        setActionSuccess(`✓ New Relief Shelter "${payload.name}" registered and published live.`);
       }
 
       setShowAddModal(false);
@@ -148,11 +172,16 @@ export default function ShelterManager({ lang = 'en' }) {
 
   // Quick capacity modifier (+/- 10 or +/- 1)
   const handleQuickCapacityChange = async (shelter, delta) => {
-    const newAvailable = Math.max(0, Math.min(shelter.capacity_total, shelter.capacity_available + delta));
+    const newAvailable = Math.max(
+      0,
+      Math.min(shelter.capacity_total, shelter.capacity_available + delta)
+    );
     let newStatus = shelter.status;
     if (newAvailable === 0) newStatus = 'Full';
-    else if (newAvailable <= shelter.capacity_total * 0.25) newStatus = 'Near Capacity';
-    else if (shelter.status === 'Full' || shelter.status === 'Near Capacity') newStatus = 'Open';
+    else if (newAvailable <= shelter.capacity_total * 0.25)
+      newStatus = 'Near Capacity';
+    else if (shelter.status === 'Full' || shelter.status === 'Near Capacity')
+      newStatus = 'Open';
 
     try {
       await api.updateShelter(shelter.id, {
@@ -177,7 +206,8 @@ export default function ShelterManager({ lang = 'en' }) {
 
   // Delete Shelter
   const handleDeleteShelter = async (id, sName) => {
-    if (!window.confirm(`Are you sure you want to remove shelter "${sName}"?`)) return;
+    if (!window.confirm(`Are you sure you want to remove shelter "${sName}"?`))
+      return;
     try {
       await api.deleteShelter(id);
       await fetchShelters();
@@ -190,9 +220,26 @@ export default function ShelterManager({ lang = 'en' }) {
 
   // Aggregate stats
   const totalShelters = shelters.length;
-  const totalCap = shelters.reduce((acc, s) => acc + (s.capacity_total || 0), 0);
-  const totalAvail = shelters.reduce((acc, s) => acc + (s.capacity_available || 0), 0);
-  const openCamps = shelters.filter(s => s.status === 'Open' || s.status === 'Near Capacity').length;
+  const totalCap = shelters.reduce(
+    (acc, s) => acc + (s.capacity_total || 0),
+    0
+  );
+  const totalAvail = shelters.reduce(
+    (acc, s) => acc + (s.capacity_available || 0),
+    0
+  );
+  const openCamps = shelters.filter(
+    (s) => s.status === 'Open' || s.status === 'Near Capacity'
+  ).length;
+
+  const formOccPct =
+    capacityTotal > 0
+      ? Math.round(
+          ((capacityTotal - Math.min(capacityTotal, capacityAvailable)) /
+            capacityTotal) *
+            100
+        )
+      : 0;
 
   return (
     <div className="shelter-manager-root">
@@ -206,8 +253,15 @@ export default function ShelterManager({ lang = 'en' }) {
             </h2>
             <span className="live-pill">LIVE COMMAND DIRECTORY</span>
           </div>
-          <p style={{ margin: '4px 0 0 0', fontSize: 12.5, color: 'var(--text-dim)' }}>
-            Real-time management of verified disaster relief shelters, high-ground camps, bed capacity, and live amenities broadcasted to citizens.
+          <p
+            style={{
+              margin: '4px 0 0 0',
+              fontSize: 12.5,
+              color: 'var(--text-dim)',
+            }}
+          >
+            Real-time management of verified disaster relief shelters, high-ground
+            camps, bed capacity, and live amenities broadcasted to citizens.
           </p>
         </div>
 
@@ -237,12 +291,17 @@ export default function ShelterManager({ lang = 'en' }) {
         <div className="shelter-stat-card">
           <div className="stat-label">Available Space Vacancy</div>
           <div className="stat-val text-green">{totalAvail}</div>
-          <div className="stat-sub">{totalCap > 0 ? Math.round((totalAvail / totalCap) * 100) : 0}% Free Beds</div>
+          <div className="stat-sub">
+            {totalCap > 0 ? Math.round((totalAvail / totalCap) * 100) : 0}% Free
+            Beds
+          </div>
         </div>
 
         <div className="shelter-stat-card">
           <div className="stat-label">Occupied Citizens</div>
-          <div className="stat-val text-amber">{Math.max(0, totalCap - totalAvail)}</div>
+          <div className="stat-val text-amber">
+            {Math.max(0, totalCap - totalAvail)}
+          </div>
           <div className="stat-sub">Sheltered with Food/Medical</div>
         </div>
       </div>
@@ -259,7 +318,9 @@ export default function ShelterManager({ lang = 'en' }) {
           <button
             key={sec.id}
             type="button"
-            className={`shelter-sec-tab ${activeSector === sec.id ? 'active' : ''}`}
+            className={`shelter-sec-tab ${
+              activeSector === sec.id ? 'active' : ''
+            }`}
             onClick={() => setActiveSector(sec.id)}
           >
             {sec.label}
@@ -270,31 +331,74 @@ export default function ShelterManager({ lang = 'en' }) {
       {/* ── Shelters Grid ── */}
       <div className="shelter-cards-grid">
         {shelters.length === 0 && (
-          <div className="empty-note" style={{ gridColumn: '1 / -1', padding: 40, textAlign: 'center' }}>
-            No relief shelters recorded for this sector. Click <strong>"Add New Relief Shelter"</strong> above to register an emergency camp.
+          <div
+            className="empty-note"
+            style={{
+              gridColumn: '1 / -1',
+              padding: 40,
+              textAlign: 'center',
+            }}
+          >
+            No relief shelters recorded for this sector. Click{' '}
+            <strong>"Add New Relief Shelter"</strong> above to register an
+            emergency camp.
           </div>
         )}
 
         {shelters.map((s) => {
-          const occPct = s.capacity_total > 0
-            ? Math.round(((s.capacity_total - s.capacity_available) / s.capacity_total) * 100)
-            : 0;
+          const occPct =
+            s.capacity_total > 0
+              ? Math.round(
+                  ((s.capacity_total - s.capacity_available) /
+                    s.capacity_total) *
+                    100
+                )
+              : 0;
 
-          const statusColor = s.status === 'Open' ? '#166534' : s.status === 'Near Capacity' ? '#d97706' : '#dc2626';
-          const statusBg = s.status === 'Open' ? '#f0fdf4' : s.status === 'Near Capacity' ? '#fffbeb' : '#fef2f2';
+          const statusColor =
+            s.status === 'Open'
+              ? '#166534'
+              : s.status === 'Near Capacity'
+              ? '#d97706'
+              : '#dc2626';
+          const statusBg =
+            s.status === 'Open'
+              ? '#f0fdf4'
+              : s.status === 'Near Capacity'
+              ? '#fffbeb'
+              : '#fef2f2';
 
           return (
             <div key={s.id} className="shelter-admin-card">
               {/* Header */}
               <div className="shelter-card-top">
                 <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      flexWrap: 'wrap',
+                    }}
+                  >
                     <span className="sector-tag">Sector {s.sector_id}</span>
-                    <span style={{ fontWeight: 800, fontSize: 14.5, color: 'var(--text)' }}>
+                    <span
+                      style={{
+                        fontWeight: 800,
+                        fontSize: 14.5,
+                        color: 'var(--text)',
+                      }}
+                    >
                       {s.name}
                     </span>
                   </div>
-                  <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 3 }}>
+                  <div
+                    style={{
+                      fontSize: 12,
+                      color: 'var(--text-dim)',
+                      marginTop: 3,
+                    }}
+                  >
                     📍 {s.location}
                   </div>
                 </div>
@@ -322,11 +426,28 @@ export default function ShelterManager({ lang = 'en' }) {
 
               {/* Capacity Meter */}
               <div className="shelter-capacity-section">
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    fontSize: 12,
+                    marginBottom: 4,
+                  }}
+                >
                   <span>
-                    Vacancy: <strong style={{ color: '#166534' }}>{s.capacity_available} Available</strong> / {s.capacity_total} Beds
+                    Vacancy:{' '}
+                    <strong style={{ color: '#166534' }}>
+                      {s.capacity_available} Available
+                    </strong>{' '}
+                    / {s.capacity_total} Beds
                   </span>
-                  <span style={{ fontWeight: 700, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
+                  <span
+                    style={{
+                      fontWeight: 700,
+                      color: 'var(--text-dim)',
+                      fontFamily: 'var(--font-mono)',
+                    }}
+                  >
                     {occPct}% Full
                   </span>
                 </div>
@@ -336,14 +457,25 @@ export default function ShelterManager({ lang = 'en' }) {
                     className="capacity-bar-fill"
                     style={{
                       width: `${occPct}%`,
-                      backgroundColor: occPct > 90 ? '#dc2626' : occPct > 70 ? '#d97706' : '#166534',
+                      backgroundColor:
+                        occPct > 90
+                          ? '#dc2626'
+                          : occPct > 70
+                          ? '#d97706'
+                          : '#166534',
                     }}
                   />
                 </div>
 
                 {/* Quick Capacity Stepper Controls */}
                 <div className="capacity-quick-steppers">
-                  <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-dim)' }}>
+                  <span
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: 'var(--text-dim)',
+                    }}
+                  >
                     Quick Available Update:
                   </span>
                   <div style={{ display: 'flex', gap: 4 }}>
@@ -351,7 +483,7 @@ export default function ShelterManager({ lang = 'en' }) {
                       type="button"
                       className="btn-stepper"
                       onClick={() => handleQuickCapacityChange(s, -10)}
-                      title="Subtract 10 available spots (10 citizens arrived)"
+                      title="Subtract 10 available spots"
                     >
                       −10
                     </button>
@@ -399,13 +531,25 @@ export default function ShelterManager({ lang = 'en' }) {
                 <div style={{ fontSize: 11.5 }}>
                   Officer: <strong>{s.contact_person || 'NDRF Command'}</strong>
                   {s.contact_phone && (
-                    <span style={{ marginLeft: 6, color: 'var(--accent)', fontWeight: 700 }}>
+                    <span
+                      style={{
+                        marginLeft: 6,
+                        color: 'var(--accent)',
+                        fontWeight: 700,
+                      }}
+                    >
                       📞 {s.contact_phone}
                     </span>
                   )}
                 </div>
                 {s.lat && s.lng && (
-                  <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)' }}>
+                  <div
+                    style={{
+                      fontSize: 11,
+                      fontFamily: 'var(--font-mono)',
+                      color: 'var(--text-faint)',
+                    }}
+                  >
                     GPS: {Number(s.lat).toFixed(4)}, {Number(s.lng).toFixed(4)}
                   </div>
                 )}
@@ -413,14 +557,27 @@ export default function ShelterManager({ lang = 'en' }) {
 
               {s.notes && (
                 <div className="shelter-note-box">
-                  <strong>Notes: </strong>{s.notes}
+                  <strong>Notes: </strong>
+                  {s.notes}
                 </div>
               )}
 
               {/* Card Footer Actions */}
               <div className="shelter-card-footer">
-                <div style={{ fontSize: 10.5, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>
-                  Updated: {s.updated_at ? new Date(s.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Live'}
+                <div
+                  style={{
+                    fontSize: 10.5,
+                    color: 'var(--text-faint)',
+                    fontFamily: 'var(--font-mono)',
+                  }}
+                >
+                  Updated:{' '}
+                  {s.updated_at
+                    ? new Date(s.updated_at).toLocaleTimeString([], {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })
+                    : 'Live'}
                 </div>
 
                 <div style={{ display: 'flex', gap: 6 }}>
@@ -445,177 +602,351 @@ export default function ShelterManager({ lang = 'en' }) {
         })}
       </div>
 
-      {/* ── Add / Edit Shelter Modal ── */}
+      {/* ── SIMPLIFIED & ELEGANT REGISTER/EDIT SHELTER MODAL ── */}
       {showAddModal && (
         <div className="modal-backdrop" onClick={() => setShowAddModal(false)}>
-          <div className="modal-box shelter-form-modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-icon">🏛️</div>
-            <div className="modal-title">
-              {editingShelter ? 'Edit Relief Shelter Details' : 'Register New Relief Shelter'}
+          <div
+            className="modal-box shelter-simplified-modal"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="shelter-modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div className="shelter-modal-icon-badge">🏛️</div>
+                <div>
+                  <h3 className="shelter-modal-title">
+                    {editingShelter
+                      ? 'Edit Relief Shelter'
+                      : 'Register New Relief Shelter'}
+                  </h3>
+                  <p className="shelter-modal-sub">
+                    Live parameters broadcasted across Citizen Network and Rescuer EOC.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="shelter-modal-close-btn"
+                onClick={() => setShowAddModal(false)}
+                title="Close"
+              >
+                ✕
+              </button>
             </div>
-            <div className="modal-subtitle">
-              Configure shelter location, capacity, amenities, and live emergency status.
-            </div>
 
-            <form onSubmit={handleSaveShelter}>
-              <div className="form-group" style={{ marginBottom: 10 }}>
-                <label>Shelter / Camp Name *</label>
-                <input
-                  value={name}
-                  onChange={e => setName(e.target.value)}
-                  placeholder="e.g. Haflong Central Hill School Relief Camp"
-                  required
-                />
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
-                <div className="form-group">
-                  <label>Disaster Sector *</label>
-                  <select
-                    value={sectorId}
-                    onChange={e => handleSectorSelectChange(e.target.value)}
-                  >
-                    <option value="A">Sector A (Assam)</option>
-                    <option value="B">Sector B (Meghalaya)</option>
-                    <option value="C">Sector C (Sikkim)</option>
-                    <option value="D">Sector D (Arunachal)</option>
-                    <option value="E">Sector E (Nagaland)</option>
-                    <option value="F">Sector F (Mizoram)</option>
-                  </select>
+            <form onSubmit={handleSaveShelter} className="shelter-modal-form">
+              {/* SECTION 1: Identity & Sector */}
+              <div className="form-section-card">
+                <div className="form-section-title">
+                  <span>🏢</span> Basic Details
                 </div>
 
-                <div className="form-group">
-                  <label>Initial Status *</label>
-                  <select
-                    value={status}
-                    onChange={e => setStatus(e.target.value)}
-                  >
-                    <option value="Open">Open &amp; Accepting Citizens</option>
-                    <option value="Near Capacity">Near Capacity</option>
-                    <option value="Full">Full / No Vacancy</option>
-                    <option value="Closed">Closed / Evacuated</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="form-group" style={{ marginBottom: 10 }}>
-                <label>Exact Location / Address / Landmark *</label>
-                <input
-                  value={location}
-                  onChange={e => setLocation(e.target.value)}
-                  placeholder="e.g. Near Haflong Ridge Gate 3, High Ground"
-                  required
-                />
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
-                <div className="form-group">
-                  <label>Latitude (GPS)</label>
+                <div className="form-row-full">
+                  <label className="form-label-styled">
+                    Shelter / Camp Name <span className="req">*</span>
+                  </label>
                   <input
-                    value={lat}
-                    onChange={e => setLat(e.target.value)}
-                    placeholder="e.g. 25.1685"
-                  />
-                </div>
-                <div className="form-group">
-                  <label>Longitude (GPS)</label>
-                  <input
-                    value={lng}
-                    onChange={e => setLng(e.target.value)}
-                    placeholder="e.g. 93.0234"
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
-                <div className="form-group">
-                  <label>Total Bed Capacity *</label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={capacityTotal}
-                    onChange={e => setCapacityTotal(e.target.value)}
+                    type="text"
+                    className="form-input-styled"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="e.g. Haflong Central Hill School Relief Camp"
                     required
                   />
                 </div>
-                <div className="form-group">
-                  <label>Currently Available Beds *</label>
-                  <input
-                    type="number"
-                    min="0"
-                    max={capacityTotal}
-                    value={capacityAvailable}
-                    onChange={e => setCapacityAvailable(e.target.value)}
-                    required
-                  />
+
+                <div className="form-grid-2">
+                  <div>
+                    <label className="form-label-styled">
+                      Disaster Sector <span className="req">*</span>
+                    </label>
+                    <select
+                      className="form-input-styled"
+                      value={sectorId}
+                      onChange={(e) => handleSectorSelectChange(e.target.value)}
+                    >
+                      <option value="A">Sector A (Assam)</option>
+                      <option value="B">Sector B (Meghalaya)</option>
+                      <option value="C">Sector C (Sikkim)</option>
+                      <option value="D">Sector D (Arunachal)</option>
+                      <option value="E">Sector E (Nagaland)</option>
+                      <option value="F">Sector F (Mizoram)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="form-label-styled">
+                      Operational Status <span className="req">*</span>
+                    </label>
+                    <select
+                      className="form-input-styled"
+                      value={status}
+                      onChange={(e) => setStatus(e.target.value)}
+                    >
+                      <option value="Open">🟢 Open &amp; Accepting</option>
+                      <option value="Near Capacity">🟡 Near Capacity</option>
+                      <option value="Full">🔴 Full / At Capacity</option>
+                      <option value="Closed">⚫ Closed / Evacuated</option>
+                    </select>
+                  </div>
                 </div>
               </div>
 
-              {/* Amenities Multi-Toggle */}
-              <div className="form-group" style={{ marginBottom: 10 }}>
-                <label>Available Camp Amenities &amp; Rations</label>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
-                  {DEFAULT_AMENITIES.map(am => {
-                    const isSelected = selectedAmenities.includes(am);
+              {/* SECTION 2: Location & GPS */}
+              <div className="form-section-card">
+                <div className="form-section-title">
+                  <span>📍</span> Location &amp; Safe Ground
+                </div>
+
+                <div className="form-row-full">
+                  <label className="form-label-styled">
+                    Address / Landmark / Access Route <span className="req">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    className="form-input-styled"
+                    value={location}
+                    onChange={(e) => setLocation(e.target.value)}
+                    placeholder="e.g. Haflong Ridge Gate 3, Elevated Community Hall"
+                    required
+                  />
+                </div>
+
+                {/* Compact GPS Row */}
+                <div className="gps-compact-strip">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ fontSize: 13 }}>🧭</span>
+                    <span style={{ fontSize: 11.5, color: '#475569', fontWeight: 600 }}>
+                      Sector Coordinates:
+                    </span>
+                    <span className="gps-pill-val">
+                      {lat || '25.16'}, {lng || '93.02'}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn-toggle-gps"
+                    onClick={() => setShowCustomGps((g) => !g)}
+                  >
+                    {showCustomGps ? 'Hide Custom GPS' : 'Edit Exact GPS'}
+                  </button>
+                </div>
+
+                {showCustomGps && (
+                  <div className="form-grid-2" style={{ marginTop: 8 }}>
+                    <div>
+                      <label className="form-label-styled">Latitude</label>
+                      <input
+                        type="text"
+                        className="form-input-styled"
+                        value={lat}
+                        onChange={(e) => setLat(e.target.value)}
+                        placeholder="25.1685"
+                      />
+                    </div>
+                    <div>
+                      <label className="form-label-styled">Longitude</label>
+                      <input
+                        type="text"
+                        className="form-input-styled"
+                        value={lng}
+                        onChange={(e) => setLng(e.target.value)}
+                        placeholder="93.0234"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* SECTION 3: Capacity & Vacancy */}
+              <div className="form-section-card">
+                <div className="form-section-title">
+                  <span>🛏️</span> Bed Capacity &amp; Vacancy
+                </div>
+
+                <div className="form-grid-2">
+                  <div>
+                    <label className="form-label-styled">
+                      Total Bed Capacity <span className="req">*</span>
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      className="form-input-styled"
+                      value={capacityTotal}
+                      onChange={(e) => {
+                        const val = Number(e.target.value);
+                        setCapacityTotal(val);
+                        if (capacityAvailable > val) setCapacityAvailable(val);
+                      }}
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="form-label-styled">
+                      Currently Available (Vacant) <span className="req">*</span>
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      max={capacityTotal}
+                      className="form-input-styled"
+                      value={capacityAvailable}
+                      onChange={(e) => setCapacityAvailable(Number(e.target.value))}
+                      required
+                    />
+                  </div>
+                </div>
+
+                {/* Quick Percentage Presets */}
+                <div className="capacity-preset-row">
+                  <span style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>
+                    Quick Vacancy Presets:
+                  </span>
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    <button
+                      type="button"
+                      className="btn-preset-chip"
+                      onClick={() => handleSetCapacityPreset(100)}
+                    >
+                      100% Free
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-preset-chip"
+                      onClick={() => handleSetCapacityPreset(75)}
+                    >
+                      75% Free
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-preset-chip"
+                      onClick={() => handleSetCapacityPreset(50)}
+                    >
+                      50% Free
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-preset-chip"
+                      onClick={() => handleSetCapacityPreset(20)}
+                    >
+                      20% Free
+                    </button>
+                  </div>
+                </div>
+
+                {/* Mini Preview Bar */}
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#475569', marginBottom: 3 }}>
+                    <span>Live Preview: <strong>{capacityAvailable}</strong> free beds</span>
+                    <span>{formOccPct}% Occupied</span>
+                  </div>
+                  <div className="capacity-bar-track" style={{ height: 6 }}>
+                    <div
+                      className="capacity-bar-fill"
+                      style={{
+                        width: `${formOccPct}%`,
+                        backgroundColor:
+                          formOccPct > 90
+                            ? '#dc2626'
+                            : formOccPct > 70
+                            ? '#d97706'
+                            : '#166534',
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* SECTION 4: Available Amenities */}
+              <div className="form-section-card">
+                <div className="form-section-title">
+                  <span>📦</span> Available Camp Amenities &amp; Supplies
+                </div>
+
+                <div className="amenities-modern-grid">
+                  {DEFAULT_AMENITIES.map((am) => {
+                    const isSelected = selectedAmenities.includes(am.id);
                     return (
                       <button
                         type="button"
-                        key={am}
-                        className={`amenity-toggle-chip ${isSelected ? 'active' : ''}`}
-                        onClick={() => toggleAmenity(am)}
+                        key={am.id}
+                        className={`amenity-modern-chip ${
+                          isSelected ? 'selected' : ''
+                        }`}
+                        onClick={() => toggleAmenity(am.id)}
                       >
-                        {isSelected ? '✓ ' : '+ '} {am}
+                        <span className="am-icon">{am.icon}</span>
+                        <span className="am-label">{am.label}</span>
+                        <span className="am-check">{isSelected ? '✓' : '+'}</span>
                       </button>
                     );
                   })}
                 </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
-                <div className="form-group">
-                  <label>Officer in Charge</label>
-                  <input
-                    value={contactPerson}
-                    onChange={e => setContactPerson(e.target.value)}
-                    placeholder="e.g. Capt. Bikram Barman"
-                  />
+              {/* SECTION 5: Contact & Access Notes */}
+              <div className="form-section-card">
+                <div className="form-section-title">
+                  <span>📞</span> Camp In-Charge &amp; Access Notes
                 </div>
-                <div className="form-group">
-                  <label>Officer Phone Number</label>
+
+                <div className="form-grid-2">
+                  <div>
+                    <label className="form-label-styled">Officer Name</label>
+                    <input
+                      type="text"
+                      className="form-input-styled"
+                      value={contactPerson}
+                      onChange={(e) => setContactPerson(e.target.value)}
+                      placeholder="e.g. Capt. Bikram Barman"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="form-label-styled">Contact Phone</label>
+                    <input
+                      type="text"
+                      className="form-input-styled"
+                      value={contactPhone}
+                      onChange={(e) => setContactPhone(e.target.value)}
+                      placeholder="e.g. +91 94350 11223"
+                    />
+                  </div>
+                </div>
+
+                <div className="form-row-full" style={{ marginTop: 8 }}>
+                  <label className="form-label-styled">Road Access / Special Instructions (Optional)</label>
                   <input
-                    value={contactPhone}
-                    onChange={e => setContactPhone(e.target.value)}
-                    placeholder="e.g. +91 94350 11223"
+                    type="text"
+                    className="form-input-styled"
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    placeholder="e.g. 4x4 access only, Generator running 24x7..."
                   />
                 </div>
               </div>
 
-              <div className="form-group" style={{ marginBottom: 14 }}>
-                <label>Special Instructions &amp; Road Access Notes</label>
-                <textarea
-                  rows={2}
-                  value={notes}
-                  onChange={e => setNotes(e.target.value)}
-                  placeholder="e.g. Accessible via 4x4 only, Generator operating 24x7..."
-                  style={{ width: '100%', padding: '7px 10px', borderRadius: 4, border: '1px solid #cbd5e1', fontSize: 12 }}
-                />
-              </div>
-
-              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              {/* Action Buttons */}
+              <div className="shelter-modal-actions">
                 <button
                   type="button"
-                  className="btn-secondary"
+                  className="btn-modal-cancel"
                   onClick={() => setShowAddModal(false)}
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  disabled={loading}
-                  className="btn-primary"
-                  style={{ padding: '8px 20px' }}
+                  disabled={loading || !name.trim() || !location.trim()}
+                  className="btn-modal-submit"
                 >
-                  {loading ? 'Saving...' : editingShelter ? 'Update Shelter' : 'Establish Shelter'}
+                  {loading
+                    ? 'Saving…'
+                    : editingShelter
+                    ? '✓ Save Shelter Updates'
+                    : '🚀 Establish & Publish Shelter'}
                 </button>
               </div>
             </form>
