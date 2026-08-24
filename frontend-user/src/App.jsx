@@ -120,6 +120,11 @@ export default function App() {
           />
         </div>
 
+        {/* ── Live Emergency Relief Shelters & Safe Camps Directory ── */}
+        <div style={{ marginTop: 28 }}>
+          <CitizenShelters lang={lang} />
+        </div>
+
         {/* ── Citizen Disaster Relief Feedback & Grievance (Images 3 & 4) ── */}
         <div style={{ marginTop: 28 }}>
           <CitizenFeedback lang={lang} />

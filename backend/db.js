@@ -32,10 +32,15 @@ async function query(sqlText, params = []) {
   }
 
   // SQLite Adapter
-  let sqliteSql = sqlText;
+  let sqliteSql = sqlText.replace(/NOW\(\)/gi, "datetime('now')");
 
-  // Replace Postgres positional params ($1, $2, ...) with standard SQLite ?
-  sqliteSql = sqliteSql.replace(/\$(\d+)/g, '?');
+  // Replace Postgres positional params ($1, $2, ...) with standard SQLite ? while mapping order
+  const placeholderMatches = [...sqliteSql.matchAll(/\$(\d+)/g)];
+  let orderedParams = params;
+  if (placeholderMatches.length > 0) {
+    orderedParams = placeholderMatches.map(m => params[Number(m[1]) - 1]);
+    sqliteSql = sqliteSql.replace(/\$(\d+)/g, '?');
+  }
 
   // Handle RETURNING clause if present in SQLite
   const isReturning = /RETURNING\s+\*/i.test(sqliteSql);
@@ -48,13 +53,13 @@ async function query(sqlText, params = []) {
 
   if (isSelect) {
     const stmt = sqliteDb.prepare(cleanSql);
-    const rows = stmt.all(...params);
+    const rows = stmt.all(...orderedParams);
     return { rows, rowCount: rows.length };
   }
 
   if (isInsert) {
     const stmt = sqliteDb.prepare(cleanSql);
-    const info = stmt.run(...params);
+    const info = stmt.run(...orderedParams);
     if (isReturning) {
       // Find the table being inserted into
       const tableMatch = cleanSql.match(/INSERT\s+INTO\s+([a-zA-Z0-9_]+)/i);
@@ -69,7 +74,7 @@ async function query(sqlText, params = []) {
 
   if (isUpdate || isDelete) {
     const stmt = sqliteDb.prepare(cleanSql);
-    const info = stmt.run(...params);
+    const info = stmt.run(...orderedParams);
     return { rows: [], rowCount: info.changes };
   }
 
