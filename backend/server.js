@@ -396,6 +396,112 @@ app.post('/api/chat/:id/upvote', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── SMS GATEWAY / OFFLINE INBOUND WEBHOOK ────────────────────────────────────
+
+app.post('/api/sms/inbound', async (req, res) => {
+  try {
+    const { From, from, Body, body, message, sender } = req.body;
+    const senderPhone = From || from || sender || 'SMS-Gateway';
+    const rawText = (Body || body || message || '').trim();
+
+    if (!rawText) {
+      return res.status(400).json({ error: 'SMS body is empty' });
+    }
+
+    // Check if it's an SOS Emergency or Community Chat
+    if (rawText.toUpperCase().includes('SOS') || rawText.toUpperCase().includes('EMERGENCY')) {
+      const ticket_id = 'SOS-' + Math.floor(100 + Math.random() * 900);
+      
+      // Parse pipe-delimited payload if formatted
+      const parts = rawText.split('|').map(s => s.trim());
+      let parsedName = 'Citizen (via SMS)';
+      let parsedLoc = 'Reported via 112/1078 SMS';
+      let parsedPeople = 1;
+      let parsedType = 'Flash Flood / Emergency';
+      let parsedMedical = 0;
+      let parsedNotes = rawText;
+      let parsedLat = null;
+      let parsedLng = null;
+
+      for (const part of parts) {
+        if (/^Name:\s*(.+)/i.test(part)) parsedName = part.match(/^Name:\s*(.+)/i)[1];
+        if (/^Location:\s*(.+)/i.test(part)) parsedLoc = part.match(/^Location:\s*(.+)/i)[1];
+        if (/^Persons:\s*(\d+)/i.test(part)) parsedPeople = Number(part.match(/^Persons:\s*(\d+)/i)[1]);
+        if (/^Type:\s*(.+)/i.test(part)) parsedType = part.match(/^Type:\s*(.+)/i)[1];
+        if (/^GPS:\s*([0-9.-]+),\s*([0-9.-]+)/i.test(part)) {
+          const gpsMatch = part.match(/^GPS:\s*([0-9.-]+),\s*([0-9.-]+)/i);
+          parsedLat = Number(gpsMatch[1]);
+          parsedLng = Number(gpsMatch[2]);
+        }
+        if (/^CRITICAL MEDICAL/i.test(part)) parsedMedical = 1;
+      }
+
+      const { rows } = await q(`
+        INSERT INTO reports (
+          user_id, ticket_id, name, phone, location, people, emergency_type,
+          other_details, vulnerable, notes, medical, medical_details, photo_data,
+          is_isolated, lat, lng
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+        RETURNING *
+      `, [
+        'sms_' + senderPhone.replace(/[^\w]/g, ''), ticket_id,
+        parsedName, senderPhone, parsedLoc, parsedPeople, parsedType,
+        'Inbound SMS Gateway Dispatch', 'None', parsedNotes,
+        parsedMedical, parsedMedical ? 'Critical Medical need reported via SMS' : '',
+        '', 0, parsedLat, parsedLng,
+      ]);
+
+      return res.status(201).json({
+        success: true,
+        type: 'report',
+        ticket_id,
+        record: rows[0],
+        reply: `NDRF EOC Received SOS ${ticket_id}. Emergency responders alerted.`,
+      });
+    }
+
+    // Otherwise, treat as Inbound Community Chat Message
+    let parsedChannel = 'general';
+    let parsedTag = 'Emergency Update';
+    let parsedSenderName = 'Citizen (via SMS)';
+    let parsedLoc = 'Local Sector';
+    let cleanMsg = rawText;
+
+    if (rawText.toUpperCase().includes('NDRF CITIZEN CHAT')) {
+      const parts = rawText.split('|').map(s => s.trim());
+      for (const part of parts) {
+        if (/^#(\w+)/i.test(part)) parsedChannel = part.replace(/^#/, '').toLowerCase();
+        if (/^Tag:\s*(.+)/i.test(part)) parsedTag = part.match(/^Tag:\s*(.+)/i)[1];
+        if (/^From:\s*(.+)/i.test(part)) parsedSenderName = part.match(/^From:\s*(.+)/i)[1];
+        if (/^Loc:\s*(.+)/i.test(part)) parsedLoc = part.match(/^Loc:\s*(.+)/i)[1];
+        if (/^Msg:\s*(.+)/i.test(part)) cleanMsg = part.match(/^Msg:\s*(.+)/i)[1];
+      }
+    }
+
+    const { rows } = await q(`
+      INSERT INTO community_messages (user_id, user_name, channel, tag, location, message, upvotes)
+      VALUES ($1, $2, $3, $4, $5, $6, 0)
+      RETURNING *
+    `, [
+      'sms_' + senderPhone.replace(/[^\w]/g, ''),
+      parsedSenderName,
+      parsedChannel,
+      parsedTag,
+      parsedLoc,
+      cleanMsg + ' 📲 [Via SMS Gateway]',
+    ]);
+
+    res.status(201).json({
+      success: true,
+      type: 'chat',
+      record: rows[0],
+      reply: 'Broadcasted to Citizen Community Network.',
+    });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to process inbound SMS: ' + e.message });
+  }
+});
+
 // ── SUMMARY ──────────────────────────────────────────────────────────────────
 
 app.get('/api/summary', async (req, res) => {

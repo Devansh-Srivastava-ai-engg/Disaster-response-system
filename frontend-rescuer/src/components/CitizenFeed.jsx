@@ -182,7 +182,30 @@ export default function CitizenFeed({ reports, onStatusUpdate, lang = 'en' }) {
                 Received: {new Date(r.created_at).toLocaleTimeString()}
               </div>
 
-              <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                {r.phone && r.phone !== 'Not Provided' && (
+                  <a
+                    href={`sms:${r.phone.replace(/[^\d+]/g, '')}?body=${encodeURIComponent(
+                      `[NDRF RESCUE CMD] Update on Ticket ${r.ticket_id || 'SOS-' + r.id}: ${r.unit_name || 'Rescue Unit'} is dispatched. ETA ~${r.eta_mins || 20}m. Stay in safe elevated structure.`
+                    )}`}
+                    style={{
+                      textDecoration: 'none',
+                      background: '#d97706',
+                      color: '#fff',
+                      fontSize: 11.5,
+                      fontWeight: 700,
+                      padding: '7px 12px',
+                      borderRadius: 4,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                    }}
+                    title="Send SMS update directly to citizen phone"
+                  >
+                    <span>📲 SMS Citizen</span>
+                  </a>
+                )}
+
                 {isPending && (
                   <button
                     className="dispatch-btn"

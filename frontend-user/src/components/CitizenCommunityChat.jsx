@@ -1,6 +1,15 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { api } from '../api';
 import { translations } from '../translations';
+import {
+  formatChatSmsPayload,
+  triggerSmsApp,
+  EMERGENCY_NUMBERS,
+  getOfflineChatOutbox,
+  queueOfflineChatMessage,
+  markChatMessageSmsSent,
+  syncOfflineOutbox,
+} from '../offlineSms';
 
 const CHANNELS = [
   { id: 'all', key: 'channelAll', icon: '🌐' },
@@ -38,6 +47,9 @@ export default function CitizenCommunityChat({ userId, lang = 'en' }) {
   const [activeChannel, setActiveChannel] = useState('all');
   const [messages, setMessages] = useState([]);
   const [submitting, setSubmitting] = useState(false);
+  const [isOfflineMode, setIsOfflineMode] = useState(!navigator.onLine);
+  const [outbox, setOutbox] = useState(() => getOfflineChatOutbox());
+  const [syncStatus, setSyncStatus] = useState(null);
 
   // Form states
   const [userName, setUserName] = useState(() => localStorage.getItem('sentinel_chat_name') || 'Citizen');
@@ -47,15 +59,47 @@ export default function CitizenCommunityChat({ userId, lang = 'en' }) {
   const [upvotedIds, setUpvotedIds] = useState(() => new Set());
   const [showGuidelines, setShowGuidelines] = useState(true);
 
+  // Refresh outbox state
+  const refreshOutbox = useCallback(() => {
+    setOutbox(getOfflineChatOutbox());
+  }, []);
+
   // Fetch messages from backend
   const fetchMessages = useCallback(async () => {
+    if (isOfflineMode) return;
     try {
       const data = await api.getChatMessages(activeChannel);
       setMessages(data || []);
     } catch (err) {
-      console.error('Failed to load community chat messages', err);
+      console.warn('Network unavailable, operating in offline fallback', err);
     }
-  }, [activeChannel]);
+  }, [activeChannel, isOfflineMode]);
+
+  // Handle Online / Offline network events
+  useEffect(() => {
+    const handleOnline = async () => {
+      setIsOfflineMode(false);
+      const res = await syncOfflineOutbox(api);
+      if (res.syncedCount > 0) {
+        setSyncStatus(`✓ ${res.syncedCount} offline message(s) synced with central control.`);
+        setTimeout(() => setSyncStatus(null), 5000);
+      }
+      refreshOutbox();
+      fetchMessages();
+    };
+
+    const handleOffline = () => {
+      setIsOfflineMode(true);
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [fetchMessages, refreshOutbox]);
 
   useEffect(() => {
     fetchMessages();
@@ -63,36 +107,100 @@ export default function CitizenCommunityChat({ userId, lang = 'en' }) {
     return () => clearInterval(interval);
   }, [fetchMessages]);
 
+  // Manual Outbox Sync
+  const handleManualSync = async () => {
+    setSubmitting(true);
+    try {
+      const res = await syncOfflineOutbox(api);
+      if (res.syncedCount > 0) {
+        setSyncStatus(`✓ Successfully synced ${res.syncedCount} message(s) to live network.`);
+      } else {
+        setSyncStatus('✓ Outbox is empty or fully synchronized.');
+      }
+      refreshOutbox();
+      await fetchMessages();
+      setTimeout(() => setSyncStatus(null), 5000);
+    } catch (e) {
+      setSyncStatus('❌ Sync failed — Check internet connectivity.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // Broadcast Online via Web API
   const handleSendMessage = async (e) => {
     if (e) e.preventDefault();
     if (!messageText.trim()) return;
 
+    localStorage.setItem('sentinel_chat_name', userName.trim() || 'Citizen');
+    localStorage.setItem('sentinel_chat_loc', location.trim() || 'Disaster Zone');
+
+    const msgPayload = {
+      user_id: userId,
+      user_name: userName.trim() || 'Citizen',
+      channel: activeChannel === 'all' ? 'general' : activeChannel,
+      tag: selectedTag,
+      location: location.trim() || 'Disaster Relief Sector',
+      message: messageText.trim(),
+    };
+
+    if (isOfflineMode) {
+      // Direct queue in offline outbox
+      queueOfflineChatMessage(msgPayload);
+      refreshOutbox();
+      setMessageText('');
+      setSyncStatus('✓ Message queued in Offline Outbox. Will sync when online.');
+      setTimeout(() => setSyncStatus(null), 4000);
+      return;
+    }
+
     setSubmitting(true);
     try {
-      localStorage.setItem('sentinel_chat_name', userName.trim() || 'Citizen');
-      localStorage.setItem('sentinel_chat_loc', location.trim() || 'Disaster Zone');
-
-      await api.sendChatMessage({
-        user_id: userId,
-        user_name: userName.trim() || 'Citizen',
-        channel: activeChannel === 'all' ? 'general' : activeChannel,
-        tag: selectedTag,
-        location: location.trim() || 'Disaster Relief Sector',
-        message: messageText.trim(),
-      });
-
+      await api.sendChatMessage(msgPayload);
       setMessageText('');
       await fetchMessages();
 
-      // Scroll to bottom
       setTimeout(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
       }, 100);
     } catch (err) {
-      console.error('Failed to broadcast message', err);
+      console.warn('Web transmission failed, saving to offline outbox', err);
+      queueOfflineChatMessage(msgPayload);
+      refreshOutbox();
+      setMessageText('');
+      setSyncStatus('⚠️ Web transmission failed. Saved to Offline Outbox for auto-sync.');
     } finally {
       setSubmitting(false);
     }
+  };
+
+  // Transmit via Native Cellular SMS
+  const handleTransmitChatSms = () => {
+    if (!messageText.trim()) return;
+
+    localStorage.setItem('sentinel_chat_name', userName.trim() || 'Citizen');
+    localStorage.setItem('sentinel_chat_loc', location.trim() || 'Disaster Zone');
+
+    const msgPayload = {
+      user_id: userId,
+      user_name: userName.trim() || 'Citizen',
+      channel: activeChannel === 'all' ? 'general' : activeChannel,
+      tag: selectedTag,
+      location: location.trim() || 'Disaster Relief Sector',
+      message: messageText.trim(),
+    };
+
+    // Queue in outbox and mark as sms transmitted
+    const queuedItem = queueOfflineChatMessage(msgPayload);
+    markChatMessageSmsSent(queuedItem.offline_id);
+    refreshOutbox();
+
+    const smsText = formatChatSmsPayload(msgPayload);
+    triggerSmsApp(EMERGENCY_NUMBERS.communityGateway, smsText);
+
+    setMessageText('');
+    setSyncStatus('✓ SMS messaging app opened. Message logged in local outbox.');
+    setTimeout(() => setSyncStatus(null), 6000);
   };
 
   const handleUpvote = async (msgId) => {
@@ -124,10 +232,23 @@ export default function CitizenCommunityChat({ userId, lang = 'en' }) {
       {/* ── Chat Header ── */}
       <div className="chat-header-bar">
         <div className="chat-header-left">
-          <div className="chat-live-pulse-badge">
-            <span className="live-dot" />
-            <span>{t.chatLivePill}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <div className={`chat-live-pulse-badge ${isOfflineMode ? 'offline' : ''}`}>
+              <span className={`live-dot ${isOfflineMode ? 'offline' : ''}`} />
+              <span>{isOfflineMode ? t.offlineStatus : t.chatLivePill}</span>
+            </div>
+
+            {/* Offline Mode Manual Simulator Toggle */}
+            <button
+              type="button"
+              className={`btn-offline-toggle ${isOfflineMode ? 'active' : ''}`}
+              onClick={() => setIsOfflineMode(m => !m)}
+              title="Toggle Offline SMS emergency simulation"
+            >
+              <span>{isOfflineMode ? '🟢 Switch to Online Web' : '📶 Simulate No-Internet (SMS Mode)'}</span>
+            </button>
           </div>
+
           <h3 className="chat-main-title">{t.chatTitle}</h3>
           <p className="chat-subtitle-text">{t.chatSubtitle}</p>
         </div>
@@ -139,6 +260,37 @@ export default function CitizenCommunityChat({ userId, lang = 'en' }) {
           </div>
         </div>
       </div>
+
+      {/* ── Offline Banner Alert ── */}
+      {isOfflineMode && (
+        <div className="offline-mode-alert-card">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 20 }}>📶</span>
+            <div style={{ flex: 1, fontSize: 12.5, color: '#991b1b', fontWeight: 600 }}>
+              {t.offlineSmsBanner}
+            </div>
+            {outbox.length > 0 && (
+              <button
+                type="button"
+                className="btn-sync-outbox"
+                onClick={handleManualSync}
+                disabled={submitting}
+              >
+                🔄 {t.syncNow} ({outbox.length})
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Sync Status Banner */}
+      {syncStatus && (
+        <div className="alert-success" style={{ marginBottom: 14 }}>
+          <div className="alert-success-text" style={{ fontSize: 12.5 }}>
+            {syncStatus}
+          </div>
+        </div>
+      )}
 
       {/* ── Guidelines Alert ── */}
       {showGuidelines && (
@@ -182,7 +334,34 @@ export default function CitizenCommunityChat({ userId, lang = 'en' }) {
       <div className="chat-body-grid">
         {/* Messages Feed */}
         <div className="chat-messages-container">
-          {messages.length === 0 ? (
+          {/* Offline Outbox Strip (if any queued items exist) */}
+          {outbox.length > 0 && (
+            <div className="offline-outbox-box">
+              <div className="outbox-header">
+                <span>📦 {t.offlineOutboxTitle} ({outbox.length} pending sync)</span>
+                <span style={{ fontSize: 11, color: '#6b7280' }}>Local Device Storage</span>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6 }}>
+                {outbox.map((ob) => (
+                  <div key={ob.offline_id} className="outbox-item-row">
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 700, fontSize: 11.5 }}>
+                        #{ob.channel} • {ob.tag} — <span style={{ fontWeight: 500 }}>"{ob.message}"</span>
+                      </div>
+                      <div style={{ fontSize: 10.5, color: '#6b7280' }}>
+                        Queued: {new Date(ob.queued_at).toLocaleTimeString()} {ob.sms_sent && '• ✓ Transmitted via SMS'}
+                      </div>
+                    </div>
+                    <span className={`outbox-badge ${ob.sms_sent ? 'sms' : 'queued'}`}>
+                      {ob.sms_sent ? 'SMS Sent' : 'Queued'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {messages.length === 0 && outbox.length === 0 ? (
             <div className="chat-empty-state">
               <div style={{ fontSize: 32, marginBottom: 8 }}>📡</div>
               <div style={{ fontWeight: 700, color: '#334155', fontSize: 14 }}>{t.emptyChat}</div>
@@ -335,17 +514,31 @@ export default function CitizenCommunityChat({ userId, lang = 'en' }) {
               />
             </div>
 
-            <button
-              type="submit"
-              disabled={submitting || !messageText.trim()}
-              className="btn-broadcast-chat"
-            >
-              {submitting ? (
-                <span>📡 {t.chatSending}</span>
-              ) : (
-                <span>🚀 {t.chatSendBtn}</span>
-              )}
-            </button>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
+              {/* Online Web Broadcast Button */}
+              <button
+                type="submit"
+                disabled={submitting || !messageText.trim()}
+                className="btn-broadcast-chat"
+              >
+                {submitting ? (
+                  <span>📡 {t.chatSending}</span>
+                ) : (
+                  <span>🚀 {t.chatSendBtn}</span>
+                )}
+              </button>
+
+              {/* Direct Offline SMS Broadcast Button */}
+              <button
+                type="button"
+                disabled={!messageText.trim()}
+                className="btn-offline-sms"
+                onClick={handleTransmitChatSms}
+                title="Send as encoded SMS to disaster hub"
+              >
+                <span>{t.transmitChatViaSms}</span>
+              </button>
+            </div>
           </form>
         </div>
       </div>

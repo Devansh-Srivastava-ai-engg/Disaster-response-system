@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef } from 'react';
 import UserLiveMap from './UserLiveMap';
 import { translations } from '../translations';
+import { formatSosSmsPayload, triggerSmsApp, EMERGENCY_NUMBERS } from '../offlineSms';
 
 const DISASTER_TYPES = [
   'Trapped on Roof (Flooding)',
@@ -39,8 +40,38 @@ export default function CitizenFeed({ onSubmit, reports = [], userId, lang = 'en
   const [photoData, setPhotoData] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(null);
+  const [smsModalData, setSmsModalData] = useState(null);
   const [gpsStatus, setGpsStatus] = useState('idle'); // 'idle' | 'fetching' | 'ok' | 'denied'
   const [lockedCoords, setLockedCoords] = useState(null);
+
+  // Direct Offline SMS Dispatch
+  const handleTransmitViaSms = async (targetNumber = EMERGENCY_NUMBERS.nationalEmergency) => {
+    let gps = lockedCoords;
+    if (!gps) {
+      try {
+        gps = await getGpsCoords();
+      } catch {
+        gps = null;
+      }
+    }
+
+    const payload = {
+      name: name.trim() || 'Anonymous Citizen',
+      phone: phone.trim() || 'Not Provided',
+      location: location.trim() || 'Disaster Sector',
+      people: Number(people) || 1,
+      emergency_type: type,
+      other_details: type === 'Other Disaster Situation' ? otherDetails.trim() : '',
+      medical,
+      medical_details: medical ? medicalDetails.trim() : '',
+      notes: notes.trim(),
+      ...(gps ? { lat: gps.lat, lng: gps.lng } : {}),
+    };
+
+    const smsText = formatSosSmsPayload(payload);
+    triggerSmsApp(targetNumber, smsText);
+    setSmsModalData({ number: targetNumber, text: smsText });
+  };
 
   // Auto-lock GPS handler
   const handleAutoLockGps = async () => {
@@ -341,14 +372,24 @@ export default function CitizenFeed({ onSubmit, reports = [], userId, lang = 'en
               </div>
             </div>
 
-            {/* Submit Button */}
-            <button
-              type="submit"
-              className="btn-primary btn-submit-sos"
-              disabled={submitting}
-            >
-              {submitting ? t.submitting : t.submitBtn}
-            </button>
+            {/* Action Buttons: Online SOS + Offline SMS Direct */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 18 }}>
+              <button
+                type="submit"
+                className="btn-primary btn-submit-sos"
+                disabled={submitting}
+              >
+                {submitting ? t.submitting : t.submitBtn}
+              </button>
+
+              <button
+                type="button"
+                className="btn-offline-sms"
+                onClick={() => handleTransmitViaSms(EMERGENCY_NUMBERS.nationalEmergency)}
+              >
+                <span>{t.transmitViaSms}</span>
+              </button>
+            </div>
           </form>
         </div>
 
@@ -511,6 +552,56 @@ export default function CitizenFeed({ onSubmit, reports = [], userId, lang = 'en
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {/* ── Offline SMS Transmission Info Modal ── */}
+      {smsModalData && (
+        <div className="modal-backdrop" onClick={() => setSmsModalData(null)}>
+          <div className="modal-box" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-icon">📲</div>
+            <div className="modal-title">Offline Emergency SMS Dispatched</div>
+            <div className="modal-subtitle">{t.smsAppOpened}</div>
+
+            <div className="modal-details">
+              <div className="modal-detail-row">
+                <span>Recipient Number:</span>
+                <span style={{ fontWeight: 800, color: '#b91c1c' }}>{smsModalData.number} (National Emergency)</span>
+              </div>
+              <div style={{ marginTop: 6, fontSize: 11.5, color: '#475569' }}>
+                <strong>Formatted Payload:</strong>
+                <div style={{
+                  background: '#fff', border: '1px solid #cbd5e1', padding: '8px',
+                  borderRadius: 4, marginTop: 4, fontFamily: 'var(--font-mono)',
+                  fontSize: 11, wordBreak: 'break-all', maxHeight: 90, overflowY: 'auto'
+                }}>
+                  {smsModalData.text}
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+              <button
+                type="button"
+                className="btn-primary"
+                style={{ flex: 1, padding: '8px 12px', fontSize: 12.5 }}
+                onClick={() => {
+                  navigator.clipboard?.writeText(smsModalData.text);
+                  alert('✓ Emergency SMS text copied to clipboard.');
+                }}
+              >
+                📋 {t.smsCopyPayload}
+              </button>
+              <button
+                type="button"
+                className="btn-secondary"
+                style={{ padding: '8px 16px', fontSize: 12.5 }}
+                onClick={() => setSmsModalData(null)}
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}

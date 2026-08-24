@@ -68,10 +68,16 @@ export default function Header({ online, lang = 'en', onToggleLang, summary }) {
           </div>
 
           <div className="gov-nav-actions">
+            <span className={`portal-pill ${online ? 'online-badge' : 'offline-badge'}`}>
+              <span className={`portal-status-dot ${online ? 'online' : 'offline'}`} />
+              <span>{online ? t.onlineStatus : t.offlineStatus}</span>
+            </span>
+
             <a href="#community-chat" className="portal-pill link" style={{ textDecoration: 'none', cursor: 'pointer' }}>
               <span>💬</span>
               <span>{lang === 'hi' ? 'नागरिक चैट' : 'Community Chat'}</span>
             </a>
+
             <div className="sos-counter-badge">
               <span className="pulse-ping" />
               <span>((o)) {summary?.activeSOS ?? 3} SOS</span>
