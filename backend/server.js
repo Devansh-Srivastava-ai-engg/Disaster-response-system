@@ -337,6 +337,65 @@ app.patch('/api/feedback/:id/action-note', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── CITIZEN COMMUNITY EMERGENCY CHAT ─────────────────────────────────────────
+
+app.get('/api/chat', async (req, res) => {
+  try {
+    const { channel, limit = 60 } = req.query;
+    const lim = Math.min(Number(limit) || 60, 100);
+
+    let sql = 'SELECT * FROM community_messages';
+    let params = [];
+
+    if (channel && channel !== 'all') {
+      sql += ' WHERE channel = $1';
+      params.push(channel);
+    }
+
+    sql += ` ORDER BY id ASC LIMIT ${lim}`;
+
+    const { rows } = await q(sql, params);
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/chat', async (req, res) => {
+  try {
+    const { user_id, user_name, channel, tag, location, message } = req.body;
+
+    if (!message || !message.trim()) {
+      return res.status(400).json({ error: 'Message content is required' });
+    }
+
+    const { rows } = await q(`
+      INSERT INTO community_messages (user_id, user_name, channel, tag, location, message, upvotes)
+      VALUES ($1, $2, $3, $4, $5, $6, 0)
+      RETURNING *
+    `, [
+      user_id || '',
+      user_name?.trim() || 'Anonymous Citizen',
+      channel?.trim() || 'general',
+      tag?.trim() || 'General',
+      location?.trim() || 'Disaster Zone',
+      message.trim(),
+    ]);
+
+    res.status(201).json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/chat/:id/upvote', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { rows: existing } = await q('SELECT * FROM community_messages WHERE id = $1', [id]);
+    if (!existing[0]) return res.status(404).json({ error: 'Message not found' });
+
+    await q('UPDATE community_messages SET upvotes = upvotes + 1 WHERE id = $1', [id]);
+    const { rows } = await q('SELECT * FROM community_messages WHERE id = $1', [id]);
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── SUMMARY ──────────────────────────────────────────────────────────────────
 
 app.get('/api/summary', async (req, res) => {

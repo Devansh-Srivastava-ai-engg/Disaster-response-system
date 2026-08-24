@@ -25,4 +25,7 @@ export const api = {
   dispatch: (payload) => request('/dispatch', { method: 'POST', body: JSON.stringify(payload) }),
   getFeedback: () => request('/feedback'),
   submitFeedback: (feedback) => request('/feedback', { method: 'POST', body: JSON.stringify(feedback) }),
+  getChatMessages: (channel) => request(channel && channel !== 'all' ? `/chat?channel=${encodeURIComponent(channel)}` : '/chat'),
+  sendChatMessage: (msg) => request('/chat', { method: 'POST', body: JSON.stringify(msg) }),
+  upvoteChatMessage: (id) => request(`/chat/${id}/upvote`, { method: 'POST' }),
 };

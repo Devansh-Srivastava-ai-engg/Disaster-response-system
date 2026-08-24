@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { api } from './api';
 import Header from './components/Header';
 import CitizenFeed from './components/CitizenFeed';
+import CitizenCommunityChat from './components/CitizenCommunityChat';
 import CitizenFeedback from './components/CitizenFeedback';
 import { translations } from './translations';
 import './App.css';
@@ -109,6 +110,14 @@ export default function App() {
           userId={userId}
           lang={lang}
         />
+
+        {/* ── Citizen Emergency Community Network & Live Chat ── */}
+        <div style={{ marginTop: 28 }} id="community-chat">
+          <CitizenCommunityChat
+            userId={userId}
+            lang={lang}
+          />
+        </div>
 
         {/* ── Citizen Disaster Relief Feedback & Grievance (Images 3 & 4) ── */}
         <div style={{ marginTop: 28 }}>

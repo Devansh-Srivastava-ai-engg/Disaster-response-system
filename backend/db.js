@@ -187,6 +187,18 @@ async function initDb() {
         name TEXT NOT NULL,
         status TEXT NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS community_messages (
+        id SERIAL PRIMARY KEY,
+        user_id TEXT DEFAULT '',
+        user_name TEXT NOT NULL DEFAULT 'Anonymous Citizen',
+        channel TEXT NOT NULL DEFAULT 'general',
+        tag TEXT NOT NULL DEFAULT 'General',
+        location TEXT NOT NULL DEFAULT '',
+        message TEXT NOT NULL,
+        upvotes INTEGER NOT NULL DEFAULT 0,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
     `);
   } else {
     console.log('💾 Initialising local SQLite database (disaster.db)...');
@@ -270,6 +282,18 @@ async function initDb() {
         name TEXT NOT NULL,
         status TEXT NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS community_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT DEFAULT '',
+        user_name TEXT NOT NULL DEFAULT 'Anonymous Citizen',
+        channel TEXT NOT NULL DEFAULT 'general',
+        tag TEXT NOT NULL DEFAULT 'General',
+        location TEXT NOT NULL DEFAULT '',
+        message TEXT NOT NULL,
+        upvotes INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
     `);
   }
 
@@ -299,6 +323,13 @@ async function initDb() {
   const fbCount = Number(fbRows[0]?.count || 0);
   if (fbCount === 0) {
     await seedFeedback();
+  }
+
+  // Seed sample community messages if table is empty
+  const { rows: chatRows } = await query('SELECT COUNT(*) AS count FROM community_messages');
+  const chatCount = Number(chatRows[0]?.count || 0);
+  if (chatCount === 0) {
+    await seedCommunityMessages();
   }
 
   console.log(`✅ Database ready (${isPostgres ? 'PostgreSQL' : 'SQLite Local'}).`);
@@ -424,6 +455,80 @@ async function seedFeedback() {
         INSERT INTO feedback (name,location,ticket_id,rating,category,comment,action_note)
         VALUES (?,?,?,?,?,?,?)
       `).run(fb.name, fb.location, fb.ticket_id, fb.rating, fb.category, fb.comment, fb.action_note);
+    }
+  }
+}
+
+async function seedCommunityMessages() {
+  const messages = [
+    {
+      user_id: 'usr_seed_01',
+      user_name: 'Anand Verma',
+      channel: 'general',
+      tag: 'Emergency Update',
+      location: 'Sector A — Haflong Lower Ridge',
+      message: 'Water levels starting to recede near the lower marketplace, but debris is still blocking two-wheeler passage. Stay uphill!',
+      upvotes: 8,
+    },
+    {
+      user_id: 'usr_seed_02',
+      user_name: 'Dr. Priya Sengupta',
+      channel: 'mutual-aid',
+      tag: 'Offering Aid / Shelter',
+      location: 'Sector B — Community Health Hall',
+      message: 'We have basic first aid kits, clean ORS packets, and spare mobile power banks available here for anyone stranded near Sohra East.',
+      upvotes: 14,
+    },
+    {
+      user_id: 'usr_seed_03',
+      user_name: 'Rohan Mehra',
+      channel: 'shelter-alerts',
+      tag: 'Safe Routes & Shelter',
+      location: 'Sector C — Teesta Valley / Mangan Pass',
+      message: 'The Reshi-Rongli alternative pass is currently open and confirmed safe for light vehicles. Avoid Sevoke arterial road.',
+      upvotes: 19,
+    },
+    {
+      user_id: 'usr_seed_04',
+      user_name: 'Local Volunteer Team',
+      channel: 'mutual-aid',
+      tag: 'Need Help / Supplies',
+      location: 'Sector D — Tawang Corridor Point 4',
+      message: 'Urgent: Looking for dry baby formula and warm blankets for 3 families sheltering at Government Middle School.',
+      upvotes: 11,
+    },
+    {
+      user_id: 'usr_seed_05',
+      user_name: 'Lalramchhani',
+      channel: 'sector-f',
+      tag: 'Emergency Update',
+      location: 'Sector F — Durtlang Ridge High School',
+      message: 'Relief distribution truck just arrived at Durtlang Ridge. Clean drinking water packets are being distributed right now.',
+      upvotes: 15,
+    },
+    {
+      user_id: 'usr_seed_06',
+      user_name: 'Sunil Chettri',
+      channel: 'general',
+      tag: 'General Check-in',
+      location: 'Sector A — Railway Colony',
+      message: 'Everyone in Block 4 is safe on the upper community floor. NDRF boat was spotted 500m away.',
+      upvotes: 6,
+    },
+  ];
+
+  for (const m of messages) {
+    if (isPostgres) {
+      await query(
+        `INSERT INTO community_messages (user_id, user_name, channel, tag, location, message, upvotes)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [m.user_id, m.user_name, m.channel, m.tag, m.location, m.message, m.upvotes]
+      );
+    } else {
+      sqliteDb.prepare(`
+        INSERT INTO community_messages (user_id, user_name, channel, tag, location, message, upvotes)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(m.user_id, m.user_name, m.channel, m.tag, m.location, m.message, m.upvotes);
     }
   }
 }
