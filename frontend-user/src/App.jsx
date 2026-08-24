@@ -3,6 +3,7 @@ import { api } from './api';
 import Header from './components/Header';
 import CitizenFeed from './components/CitizenFeed';
 import CitizenCommunityChat from './components/CitizenCommunityChat';
+import CitizenShelters from './components/CitizenShelters';
 import CitizenFeedback from './components/CitizenFeedback';
 import { translations } from './translations';
 import './App.css';

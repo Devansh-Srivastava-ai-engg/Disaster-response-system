@@ -199,6 +199,24 @@ async function initDb() {
         upvotes INTEGER NOT NULL DEFAULT 0,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
+
+      CREATE TABLE IF NOT EXISTS shelters (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        sector_id TEXT NOT NULL DEFAULT 'A',
+        location TEXT NOT NULL,
+        lat REAL DEFAULT NULL,
+        lng REAL DEFAULT NULL,
+        capacity_total INTEGER NOT NULL DEFAULT 150,
+        capacity_available INTEGER NOT NULL DEFAULT 150,
+        status TEXT NOT NULL DEFAULT 'Open',
+        amenities TEXT DEFAULT 'Clean Water, Hot Food, First Aid, Power Backup',
+        contact_person TEXT DEFAULT 'NDRF Relief Officer',
+        contact_phone TEXT DEFAULT '+91 98765 43210',
+        notes TEXT DEFAULT '',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
     `);
   } else {
     console.log('💾 Initialising local SQLite database (disaster.db)...');
@@ -294,6 +312,24 @@ async function initDb() {
         upvotes INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
       );
+
+      CREATE TABLE IF NOT EXISTS shelters (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        sector_id TEXT NOT NULL DEFAULT 'A',
+        location TEXT NOT NULL,
+        lat REAL DEFAULT NULL,
+        lng REAL DEFAULT NULL,
+        capacity_total INTEGER NOT NULL DEFAULT 150,
+        capacity_available INTEGER NOT NULL DEFAULT 150,
+        status TEXT NOT NULL DEFAULT 'Open',
+        amenities TEXT DEFAULT 'Clean Water, Hot Food, First Aid, Power Backup',
+        contact_person TEXT DEFAULT 'NDRF Relief Officer',
+        contact_phone TEXT DEFAULT '+91 98765 43210',
+        notes TEXT DEFAULT '',
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
     `);
   }
 
@@ -330,6 +366,13 @@ async function initDb() {
   const chatCount = Number(chatRows[0]?.count || 0);
   if (chatCount === 0) {
     await seedCommunityMessages();
+  }
+
+  // Seed sample shelters if table is empty
+  const { rows: shelterRows } = await query('SELECT COUNT(*) AS count FROM shelters');
+  const shelterCount = Number(shelterRows[0]?.count || 0);
+  if (shelterCount === 0) {
+    await seedShelters();
   }
 
   console.log(`✅ Database ready (${isPostgres ? 'PostgreSQL' : 'SQLite Local'}).`);
@@ -529,6 +572,110 @@ async function seedCommunityMessages() {
         INSERT INTO community_messages (user_id, user_name, channel, tag, location, message, upvotes)
         VALUES (?, ?, ?, ?, ?, ?, ?)
       `).run(m.user_id, m.user_name, m.channel, m.tag, m.location, m.message, m.upvotes);
+    }
+  }
+}
+
+async function seedShelters() {
+  const shelters = [
+    {
+      name: 'Haflong Highland Multi-Purpose Relief Camp',
+      sector_id: 'A',
+      location: 'Haflong Central Hill School Complex, Sector A, Assam',
+      lat: 25.1685,
+      lng: 93.0234,
+      capacity_total: 350,
+      capacity_available: 180,
+      status: 'Open',
+      amenities: 'Clean Water, Hot Meals, First Aid, Solar Power, Blankets, Infant Rations',
+      contact_person: 'Capt. Bikram Barman',
+      contact_phone: '+91 94350 11223',
+      notes: 'Reinforced elevated hilltop structure. Accessible via Maibang Ridge safe pass.',
+    },
+    {
+      name: 'Sohra Highland Disaster Relief Center',
+      sector_id: 'B',
+      location: 'Mawphlang Community Shelter Hall, Sector B, Meghalaya',
+      lat: 25.2986,
+      lng: 91.7324,
+      capacity_total: 250,
+      capacity_available: 90,
+      status: 'Open',
+      amenities: 'Filtered Water, Dry Rations, Emergency Oxygen, Mobile Charging, Bedding Kits',
+      contact_person: 'Inspector L. Kharkongor',
+      contact_phone: '+91 98620 33445',
+      notes: 'High plateau area clear of flash floods. Pre-positioned SDRF medical team.',
+    },
+    {
+      name: 'Teesta Valley Safe Haven Camp',
+      sector_id: 'C',
+      location: 'Rongli Senior Secondary Complex, Sector C, Sikkim',
+      lat: 27.2023,
+      lng: 88.6012,
+      capacity_total: 200,
+      capacity_available: 45,
+      status: 'Near Capacity',
+      amenities: 'Water Tanker, Medical Doctor, Warm Blankets, Satellite Phone Terminal',
+      contact_person: 'Maj. T. Lepcha',
+      contact_phone: '+91 97330 55667',
+      notes: 'Reached via Reshi-Rongli safe road bypass. Avoid Sevoke highway.',
+    },
+    {
+      name: 'Dirang Monastic Rescue Shelter',
+      sector_id: 'D',
+      location: 'Dirang Community Ground, Sector D, Arunachal Pradesh',
+      lat: 27.3590,
+      lng: 92.2350,
+      capacity_total: 180,
+      capacity_available: 120,
+      status: 'Open',
+      amenities: 'Clean Water, Heated Hall, Military Ration Packs, Paramedic Station',
+      contact_person: 'Subedar K. Dorjee',
+      contact_phone: '+91 94020 77889',
+      notes: 'Reinforced monastery building outside active rockfall zone.',
+    },
+    {
+      name: 'Kohima Peace Memorial Relief Camp',
+      sector_id: 'E',
+      location: 'Naga Peace Community Hall, Sector E, Kohima',
+      lat: 25.6751,
+      lng: 94.1086,
+      capacity_total: 300,
+      capacity_available: 210,
+      status: 'Open',
+      amenities: 'Potable Water, Hot Meals, First Aid, Mobile Charging, Sanitation Units',
+      contact_person: 'Asst. Cmdt. V. Angami',
+      contact_phone: '+91 98560 99001',
+      notes: 'Directly linked to open NH-29 corridor. Continuous water supply.',
+    },
+    {
+      name: 'Durtlang Ridge Safe Relief Complex',
+      sector_id: 'F',
+      location: 'Durtlang Higher Secondary & Community Hall, Sector F, Aizawl',
+      lat: 23.7780,
+      lng: 92.7350,
+      capacity_total: 400,
+      capacity_available: 280,
+      status: 'Open',
+      amenities: '24x7 Water, Community Kitchen, Oxygen Concentrators, Power Inverters, Infant Care',
+      contact_person: 'Maj. Zoramthanga',
+      contact_phone: '+91 94361 22334',
+      notes: 'Solid rock foundation ridge safe from subsidence landslides.',
+    },
+  ];
+
+  for (const s of shelters) {
+    if (isPostgres) {
+      await query(
+        `INSERT INTO shelters (name, sector_id, location, lat, lng, capacity_total, capacity_available, status, amenities, contact_person, contact_phone, notes)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+        [s.name, s.sector_id, s.location, s.lat, s.lng, s.capacity_total, s.capacity_available, s.status, s.amenities, s.contact_person, s.contact_phone, s.notes]
+      );
+    } else {
+      sqliteDb.prepare(`
+        INSERT INTO shelters (name, sector_id, location, lat, lng, capacity_total, capacity_available, status, amenities, contact_person, contact_phone, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(s.name, s.sector_id, s.location, s.lat, s.lng, s.capacity_total, s.capacity_available, s.status, s.amenities, s.contact_person, s.contact_phone, s.notes);
     }
   }
 }

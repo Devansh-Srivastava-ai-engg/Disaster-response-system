@@ -502,6 +502,150 @@ app.post('/api/sms/inbound', async (req, res) => {
   }
 });
 
+// ── RELIEF SHELTERS & CAMPS ───────────────────────────────────────────────────
+
+app.get('/api/shelters', async (req, res) => {
+  try {
+    const { sector_id, status } = req.query;
+    let sql = 'SELECT * FROM shelters';
+    const params = [];
+
+    const conditions = [];
+    if (sector_id && sector_id !== 'all') {
+      conditions.push(`sector_id = $${params.length + 1}`);
+      params.push(sector_id.toUpperCase());
+    }
+    if (status && status !== 'all') {
+      conditions.push(`status = $${params.length + 1}`);
+      params.push(status);
+    }
+
+    if (conditions.length > 0) {
+      sql += ' WHERE ' + conditions.join(' AND ');
+    }
+
+    sql += ' ORDER BY sector_id ASC, id ASC';
+
+    const { rows } = await q(sql, params);
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/shelters', async (req, res) => {
+  try {
+    const {
+      name,
+      sector_id = 'A',
+      location,
+      lat,
+      lng,
+      capacity_total = 100,
+      capacity_available = 100,
+      status = 'Open',
+      amenities = 'Clean Water, Hot Meals, First Aid, Power Backup',
+      contact_person = '',
+      contact_phone = '',
+      notes = '',
+    } = req.body;
+
+    if (!name || !location) {
+      return res.status(400).json({ error: 'Shelter name and location are required' });
+    }
+
+    const { rows } = await q(`
+      INSERT INTO shelters (
+        name, sector_id, location, lat, lng, capacity_total, capacity_available,
+        status, amenities, contact_person, contact_phone, notes
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+      RETURNING *
+    `, [
+      name.trim(),
+      (sector_id || 'A').toUpperCase(),
+      location.trim(),
+      lat != null ? Number(lat) : null,
+      lng != null ? Number(lng) : null,
+      Number(capacity_total) || 100,
+      Number(capacity_available) || Number(capacity_total) || 100,
+      status || 'Open',
+      amenities || 'Clean Water, Hot Meals, First Aid',
+      contact_person || '',
+      contact_phone || '',
+      notes || '',
+    ]);
+
+    res.status(201).json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.patch('/api/shelters/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { rows: existing } = await q('SELECT * FROM shelters WHERE id = $1', [id]);
+    if (!existing[0]) return res.status(404).json({ error: 'Shelter not found' });
+
+    const {
+      name,
+      sector_id,
+      location,
+      lat,
+      lng,
+      capacity_total,
+      capacity_available,
+      status,
+      amenities,
+      contact_person,
+      contact_phone,
+      notes,
+    } = req.body;
+
+    await q(`
+      UPDATE shelters SET
+        name = COALESCE($1, name),
+        sector_id = COALESCE($2, sector_id),
+        location = COALESCE($3, location),
+        lat = COALESCE($4, lat),
+        lng = COALESCE($5, lng),
+        capacity_total = COALESCE($6, capacity_total),
+        capacity_available = COALESCE($7, capacity_available),
+        status = COALESCE($8, status),
+        amenities = COALESCE($9, amenities),
+        contact_person = COALESCE($10, contact_person),
+        contact_phone = COALESCE($11, contact_phone),
+        notes = COALESCE($12, notes),
+        updated_at = NOW()
+      WHERE id = $13
+    `, [
+      name != null ? name.trim() : null,
+      sector_id != null ? sector_id.toUpperCase() : null,
+      location != null ? location.trim() : null,
+      lat != null ? Number(lat) : null,
+      lng != null ? Number(lng) : null,
+      capacity_total != null ? Number(capacity_total) : null,
+      capacity_available != null ? Number(capacity_available) : null,
+      status != null ? status : null,
+      amenities != null ? amenities : null,
+      contact_person != null ? contact_person : null,
+      contact_phone != null ? contact_phone : null,
+      notes != null ? notes : null,
+      id,
+    ]);
+
+    const { rows: updated } = await q('SELECT * FROM shelters WHERE id = $1', [id]);
+    res.json(updated[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/shelters/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { rows: existing } = await q('SELECT * FROM shelters WHERE id = $1', [id]);
+    if (!existing[0]) return res.status(404).json({ error: 'Shelter not found' });
+
+    await q('DELETE FROM shelters WHERE id = $1', [id]);
+    res.json({ success: true, message: `Shelter ${id} removed` });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── SUMMARY ──────────────────────────────────────────────────────────────────
 
 app.get('/api/summary', async (req, res) => {

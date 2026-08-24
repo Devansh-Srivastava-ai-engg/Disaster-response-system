@@ -34,4 +34,8 @@ export const api = {
   getFeedback: () => request('/feedback'),
   updateFeedbackActionNote: (id, action_note) =>
     request(`/feedback/${id}/action-note`, { method: 'PATCH', body: JSON.stringify({ action_note }) }),
+  getShelters: (sectorId) => request(sectorId && sectorId !== 'all' ? `/shelters?sector_id=${encodeURIComponent(sectorId)}` : '/shelters'),
+  addShelter: (shelter) => request('/shelters', { method: 'POST', body: JSON.stringify(shelter) }),
+  updateShelter: (id, updates) => request(`/shelters/${id}`, { method: 'PATCH', body: JSON.stringify(updates) }),
+  deleteShelter: (id) => request(`/shelters/${id}`, { method: 'DELETE' }),
 };

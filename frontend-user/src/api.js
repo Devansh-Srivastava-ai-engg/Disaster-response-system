@@ -28,4 +28,5 @@ export const api = {
   getChatMessages: (channel) => request(channel && channel !== 'all' ? `/chat?channel=${encodeURIComponent(channel)}` : '/chat'),
   sendChatMessage: (msg) => request('/chat', { method: 'POST', body: JSON.stringify(msg) }),
   upvoteChatMessage: (id) => request(`/chat/${id}/upvote`, { method: 'POST' }),
+  getShelters: (sectorId) => request(sectorId && sectorId !== 'all' ? `/shelters?sector_id=${encodeURIComponent(sectorId)}` : '/shelters'),
 };

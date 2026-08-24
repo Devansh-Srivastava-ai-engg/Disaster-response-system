@@ -9,6 +9,7 @@ import ResourcePanel from './components/ResourcePanel';
 import RoutePlanner from './components/RoutePlanner';
 import CitizenFeed from './components/CitizenFeed';
 import WeatherSimulator from './components/WeatherSimulator';
+import ShelterManager from './components/ShelterManager';
 import RescuerFeedbackPanel from './components/RescuerFeedbackPanel';
 import { translations } from './translations';
 import './App.css';
@@ -303,6 +304,9 @@ export default function App() {
           </div>
         </div>
       </div>
+
+      {/* Relief Shelters & Camp Management Operations */}
+      <ShelterManager lang={lang} />
 
       {/* Citizen Feedback & Grievance Review Panel (Images 3 & 4 integration) */}
       <RescuerFeedbackPanel lang={lang} />
